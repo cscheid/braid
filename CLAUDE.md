@@ -1,5 +1,18 @@
 # an automerge-centric issue tracker for LLM agents
 
+## Terminology
+
+**braid** is the program; a **skein** is the collection of issues tracked
+for a project (one automerge document); a **strand** is a single issue;
+**loom** is reserved for a future sync-server relay. Full rationale and
+usage notes: [docs/terminology.md](docs/terminology.md). Use these words in
+prose and CLI output; interfaces (command names, schema fields) keep their
+existing names unless a strand says otherwise.
+
+This repo dogfoods braid: its own skein is configured via the gitignored
+`.braid.toml`. Run `braid agents-info` for usage; attribute your changes
+with `BRAID_AUTHOR=claude`.
+
 ## Plans
 
 In this repository, we use Markdown documents as plans. The file format for the plans is `claude-notes/plans/yyyy/mm/dd/<plan>.md`.
