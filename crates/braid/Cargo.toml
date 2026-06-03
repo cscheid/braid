@@ -1,0 +1,20 @@
+[package]
+name = "braid"
+description = "braid: an automerge-centric issue tracker for LLM agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "braid"
+path = "src/main.rs"
+
+[dependencies]
+braid-core = { path = "../braid-core" }
+automerge = { workspace = true }
+samod = { workspace = true, features = ["tokio", "tungstenite"] }
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }

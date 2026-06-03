@@ -181,6 +181,20 @@ the primary audience.
 `author` field in the secret/config file → `git config user.name` → OS
 username. First hit wins.
 
+### D14. Hydrate/reconcile: hand-written, no autosurgeon (resolved 2026-06-03)
+
+autosurgeon (0.11, and git main as of today) pins `automerge ^0.8`, while
+samod 0.10 requires `automerge ^0.9` — disjoint pre-1.0 ranges, so
+autosurgeon's types cannot unify with the documents samod hands us short of
+maintaining a fork. Decision: **manual hydrate/reconcile in `braid-core`**
+against the automerge 0.9 API. Verified: workspace resolves to a single
+`automerge 0.9.0`, and `Transactable::update_text` exists (built-in
+diff-and-splice), giving D5's Text semantics without autosurgeon's
+`similar`-based diffing. Our schema is one fixed shape, so the hand-written
+code is small and we keep total control of merge-shape decisions
+(reconcile-by-key for maps, `update_text` for prose, plain `put` for LWW
+scalars).
+
 ### D13. `init` works offline
 
 `br init` creates the document locally (in the cache via samod) and prints
@@ -274,17 +288,16 @@ Cargo workspace:
   fix this upstream.
 - **samod is pre-1.0**: API broke at 0.8 and 0.9/0.10; pin the version and
   budget for upgrades.
-- **autosurgeon compatibility**: must verify it tracks automerge 0.9 (the
-  version samod 0.10 pins). If not, manual hydrate/reconcile over the
-  automerge API (or fork/patch).
+- ~~**autosurgeon compatibility**~~: resolved — incompatible (see D14);
+  hydrate/reconcile is hand-written.
 
 ## Phased roadmap (TDD throughout — tests precede implementation in every phase)
 
 ### Phase 0 — scaffold + schema spike
 
-- [ ] Cargo workspace: `braid-core`, `braid` (CLI)
-- [ ] Pin samod 0.10 + automerge 0.9; evaluate autosurgeon vs. manual
-      hydrate/reconcile (round-trip spike test: schema → doc → schema)
+- [x] Cargo workspace: `braid-core`, `braid` (CLI)
+- [x] Pin samod 0.10 + automerge 0.9; evaluate autosurgeon vs. manual
+      hydrate/reconcile → **manual** (version conflict; see D14)
 - [ ] Tests: hydrate/reconcile round-trip for the full Issue shape,
       including Text fields and map-shaped labels/deps/comments
 - [ ] Tests: concurrent-merge semantics (two forks of a doc; edit same
