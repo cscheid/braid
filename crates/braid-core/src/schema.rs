@@ -232,14 +232,25 @@ impl DependencyType {
 
     /// Whether an edge of this type makes the issue holding it blocked
     /// while the target is not terminal.
+    ///
+    /// `parent-child` is deliberately *not* blocking: children are how an
+    /// epic progresses, so an open parent must not stop work on them. The
+    /// parent-child relationship instead gates the *parent's close* (an
+    /// issue with open children should not close) — see
+    /// `domain::open_children`.
     pub fn is_blocking(&self) -> bool {
         matches!(
             self,
             DependencyType::Blocks
-                | DependencyType::ParentChild
                 | DependencyType::ConditionalBlocks
                 | DependencyType::WaitsFor
         )
+    }
+
+    /// Whether an edge of this type expresses hierarchy (used for
+    /// close-protection and cycle detection, not ready-work).
+    pub fn is_hierarchical(&self) -> bool {
+        matches!(self, DependencyType::ParentChild)
     }
 }
 
@@ -329,7 +340,9 @@ mod tests {
     }
 
     #[test]
-    fn blocking_types_are_exactly_the_four() {
+    fn blocking_types_are_exactly_the_three() {
+        // parent-child is hierarchical, not blocking: an open epic must not
+        // stop work on its children. It gates the parent's close instead.
         let blocking: Vec<&str> = [
             "blocks",
             "parent-child",
@@ -346,10 +359,9 @@ mod tests {
         .into_iter()
         .filter(|s| DependencyType::from(*s).is_blocking())
         .collect();
-        assert_eq!(
-            blocking,
-            vec!["blocks", "parent-child", "conditional-blocks", "waits-for"]
-        );
+        assert_eq!(blocking, vec!["blocks", "conditional-blocks", "waits-for"]);
+        assert!(DependencyType::ParentChild.is_hierarchical());
+        assert!(!DependencyType::Blocks.is_hierarchical());
     }
 
     #[test]

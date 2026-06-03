@@ -6,6 +6,7 @@
 //! and implements domain logic (id generation, ready/blocked computation).
 
 pub mod amdoc;
+pub mod domain;
 pub mod id;
 pub mod schema;
 pub mod time;
