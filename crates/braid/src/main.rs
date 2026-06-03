@@ -11,15 +11,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Create a new tracker (or join an existing one) and write .braid.toml
+    /// Create a new skein (or join an existing one) and write .braid.toml
     Init {
-        /// Display name for the tracker (default: current directory name)
+        /// Display name for the skein (default: current directory name)
         #[arg(long)]
         name: Option<String>,
         /// Prefix for generated issue ids
         #[arg(long, default_value = "br")]
         prefix: String,
-        /// Adopt an existing tracker by document id instead of creating one
+        /// Adopt an existing skein by document id instead of creating one
         #[arg(long, value_name = "DOC_ID")]
         join: Option<String>,
         /// Sync server URL to record in .braid.toml
@@ -29,7 +29,7 @@ enum Cmd {
         #[arg(long)]
         print_only: bool,
     },
-    /// Create a new issue; prints its id
+    /// Create a new strand; prints its id
     Create {
         title: String,
         #[arg(short, long)]
@@ -52,13 +52,13 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Show one issue (by id or unique id fragment)
+    /// Show one strand (by id or unique id fragment)
     Show {
         id: String,
         #[arg(long)]
         json: bool,
     },
-    /// List issues
+    /// List strands
     List {
         /// Filter by status (open|in_progress|blocked|deferred|closed)
         #[arg(long)]
@@ -66,7 +66,7 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Update fields of an issue (empty string clears optional fields)
+    /// Update fields of a strand (empty string clears optional fields)
     Update {
         id: String,
         #[arg(long)]
@@ -99,7 +99,7 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Close one or more issues
+    /// Close one or more strands
     Close {
         #[arg(required = true)]
         ids: Vec<String>,
@@ -109,29 +109,29 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
-    /// Reopen closed issues
+    /// Reopen closed strands
     Reopen {
         #[arg(required = true)]
         ids: Vec<String>,
     },
-    /// Add a comment to an issue; prints the comment id
+    /// Add a comment to a strand; prints the comment id
     Comment { id: String, text: String },
-    /// Manage dependencies between issues
+    /// Manage dependencies between strands
     Dep {
         #[command(subcommand)]
         cmd: DepCmd,
     },
-    /// List issues that are ready to work on (active, unblocked)
+    /// List strands that are ready to work on (active, unblocked)
     Ready {
         #[arg(long)]
         json: bool,
     },
-    /// List active issues blocked by dependencies, with their blockers
+    /// List active strands blocked by dependencies, with their blockers
     Blocked {
         #[arg(long)]
         json: bool,
     },
-    /// Search issues (case-insensitive substring over all text)
+    /// Search strands (case-insensitive substring over all text)
     Search {
         text: String,
         #[arg(long)]
@@ -139,9 +139,9 @@ enum Cmd {
     },
     /// Print the agent-facing usage guide (markdown)
     AgentsInfo,
-    /// Import issues from a JSONL file (beads or braid format); upserts by id
+    /// Import strands from a JSONL file (beads or braid format); upserts by id
     Import { path: std::path::PathBuf },
-    /// Export all issues as JSONL to stdout
+    /// Export all strands as JSONL to stdout
     Export,
     /// Sync with the configured server (fails if unreachable)
     Sync,

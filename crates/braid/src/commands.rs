@@ -5,21 +5,21 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use automerge::Automerge;
-use braid_core::amdoc::{hydrate, init_tracker, reconcile_issue};
+use braid_core::amdoc::{hydrate, init_skein, reconcile_issue};
 use braid_core::domain::{
     blocked_issues, dependency_cycles, dependents_of, open_children, ready_issues,
 };
 use braid_core::id::{new_comment_id, new_issue_id};
 use braid_core::schema::{
-    Comment, Dependency, DependencyType, Issue, IssueType, SCHEMA_VERSION, Status, TrackerDoc,
-    TrackerMetadata,
+    Comment, Dependency, DependencyType, Issue, IssueType, SCHEMA_VERSION, Status, Skein,
+    SkeinMetadata,
 };
 use braid_core::time::now_rfc3339;
 use samod::DocumentId;
 
 use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME};
 use crate::sync::{Connect, connect, sync_timeout};
-use crate::tracker::{open_repo, open_tracker};
+use crate::skein::{open_repo, open_skein};
 
 // ---------------------------------------------------------------------------
 // init
@@ -57,15 +57,15 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
                 .or_else(|| {
                     cwd.file_name().map(|n| n.to_string_lossy().into_owned())
                 })
-                .unwrap_or_else(|| "tracker".to_string());
-            let meta = TrackerMetadata {
+                .unwrap_or_else(|| "skein".to_string());
+            let meta = SkeinMetadata {
                 schema_version: SCHEMA_VERSION,
                 name,
                 id_prefix: opts.prefix,
                 created_at: now_rfc3339(),
             };
             let mut doc = Automerge::new();
-            doc.transact(|tx| init_tracker(tx, &meta)).map_err(|f| f.error)?;
+            doc.transact(|tx| init_skein(tx, &meta)).map_err(|f| f.error)?;
 
             let repo = open_repo().await?;
             let handle = repo
@@ -83,7 +83,7 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
                             .await
                             .is_ok();
                     if confirmed {
-                        println!("announced new tracker to {sync_server}");
+                        println!("announced new skein to {sync_server}");
                     } else {
                         eprintln!(
                             "braid: created locally; {sync_server} did not confirm receipt \
@@ -94,7 +94,7 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
                 Connect::Offline(reason) => {
                     eprintln!(
                         "braid: created locally; server unreachable ({reason}) — the \
-                         tracker will be announced on the first successful `braid sync`"
+                         skein will be announced on the first successful `braid sync`"
                     );
                 }
             }
@@ -106,9 +106,9 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
     };
 
     let contents = format!(
-        "# braid tracker secret — do NOT commit this file.\n\
+        "# braid skein secret — do NOT commit this file.\n\
          # The doc_id is a bearer token: anyone holding it can read and write\n\
-         # this tracker. Ensure `{REPO_FILE_NAME}` is listed in .gitignore.\n\
+         # this skein. Ensure `{REPO_FILE_NAME}` is listed in .gitignore.\n\
          doc_id = \"{doc_id}\"\n\
          sync_server = \"{sync_server}\"\n"
     );
@@ -127,13 +127,13 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
     }
 
     match opts.join {
-        Some(_) => println!("joined tracker {doc_id}"),
-        None => println!("created tracker {doc_id}"),
+        Some(_) => println!("joined skein {doc_id}"),
+        None => println!("created skein {doc_id}"),
     }
     println!("wrote {}", secret_path.display());
     println!(
         "reminder: add `{REPO_FILE_NAME}` to your .gitignore — the doc id grants \
-         read/write access to this tracker"
+         read/write access to this skein"
     );
     Ok(())
 }
@@ -154,15 +154,15 @@ pub struct CreateOpts {
 }
 
 pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
 
-    let mut id = new_issue_id(&tracker.metadata.id_prefix, opts.slug.as_deref());
+    let mut id = new_issue_id(&skein.metadata.id_prefix, opts.slug.as_deref());
     // Collision with an existing id is astronomically improbable but free
     // to guard against locally:
-    while tracker.issues.contains_key(&id) {
-        id = new_issue_id(&tracker.metadata.id_prefix, opts.slug.as_deref());
+    while skein.issues.contains_key(&id) {
+        id = new_issue_id(&skein.metadata.id_prefix, opts.slug.as_deref());
     }
 
     let now = now_rfc3339();
@@ -207,12 +207,12 @@ pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
 
 /// Resolve a user-supplied id query: exact match first, then unique
 /// substring match.
-pub fn resolve_issue<'t>(tracker: &'t TrackerDoc, query: &str) -> Result<&'t Issue> {
-    if let Some(issue) = tracker.issues.get(query) {
+pub fn resolve_issue<'t>(skein: &'t Skein, query: &str) -> Result<&'t Issue> {
+    if let Some(issue) = skein.issues.get(query) {
         return Ok(issue);
     }
     let matches: Vec<&Issue> =
-        tracker.issues.values().filter(|i| i.id.contains(query)).collect();
+        skein.issues.values().filter(|i| i.id.contains(query)).collect();
     match matches.len() {
         0 => bail!("no issue matching {query:?}"),
         1 => Ok(matches[0]),
@@ -224,12 +224,12 @@ pub fn resolve_issue<'t>(tracker: &'t TrackerDoc, query: &str) -> Result<&'t Iss
 }
 
 pub async fn show(cwd: &Path, query: &str, json: bool) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let issue = resolve_issue(&tracker, query)?;
+    let issue = resolve_issue(&skein, query)?;
     if json {
         println!("{}", serde_json::to_string_pretty(issue)?);
     } else {
@@ -304,10 +304,10 @@ pub struct UpdateOpts {
 }
 
 pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
-    let mut issue = resolve_issue(&tracker, query)?.clone();
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let mut issue = resolve_issue(&skein, query)?.clone();
 
     if let Some(t) = opts.title {
         issue.title = t;
@@ -349,19 +349,19 @@ pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
 }
 
 pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force: bool) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
 
     // Resolve and validate everything before mutating anything.
     let mut to_close: Vec<Issue> = Vec::new();
     let closing_now: Vec<String> = queries
         .iter()
-        .map(|q| resolve_issue(&tracker, q).map(|i| i.id.clone()))
+        .map(|q| resolve_issue(&skein, q).map(|i| i.id.clone()))
         .collect::<Result<_>>()?;
     for query in queries {
-        let issue = resolve_issue(&tracker, query)?;
-        let open_kids: Vec<&Issue> = open_children(&tracker, &issue.id)
+        let issue = resolve_issue(&skein, query)?;
+        let open_kids: Vec<&Issue> = open_children(&skein, &issue.id)
             .into_iter()
             // children being closed in the same invocation don't count
             .filter(|c| !closing_now.contains(&c.id))
@@ -403,13 +403,13 @@ pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force
 }
 
 pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
 
     let mut to_reopen: Vec<Issue> = queries
         .iter()
-        .map(|q| resolve_issue(&tracker, q).cloned())
+        .map(|q| resolve_issue(&skein, q).cloned())
         .collect::<Result<_>>()?;
     let now = now_rfc3339();
     for issue in &mut to_reopen {
@@ -437,10 +437,10 @@ pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
 }
 
 pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
-    let mut issue = resolve_issue(&tracker, query)?.clone();
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let mut issue = resolve_issue(&skein, query)?.clone();
 
     let now = now_rfc3339();
     let mut comment = Comment {
@@ -470,12 +470,12 @@ pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 pub async fn dep_add(cwd: &Path, from: &str, to: &str, dep_type: &str) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let mut tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let mut skein = opened.doc.with_document(|d| hydrate(d))?;
 
-    let mut issue = resolve_issue(&tracker, from)?.clone();
-    let target_id = resolve_issue(&tracker, to)?.id.clone();
+    let mut issue = resolve_issue(&skein, from)?.clone();
+    let target_id = resolve_issue(&skein, to)?.id.clone();
     if issue.id == target_id {
         bail!("{} cannot depend on itself", issue.id);
     }
@@ -492,8 +492,8 @@ pub async fn dep_add(cwd: &Path, from: &str, to: &str, dep_type: &str) -> Result
 
     // Cycle check against the would-be state: allowed (concurrent merges
     // can create cycles regardless), but loudly warned about.
-    tracker.issues.insert(issue.id.clone(), issue.clone());
-    let cycles = dependency_cycles(&tracker);
+    skein.issues.insert(issue.id.clone(), issue.clone());
+    let cycles = dependency_cycles(&skein);
     if !cycles.is_empty() {
         for cycle in &cycles {
             eprintln!("braid: warning: dependency cycle: {}", cycle.join(" -> "));
@@ -509,12 +509,12 @@ pub async fn dep_add(cwd: &Path, from: &str, to: &str, dep_type: &str) -> Result
 }
 
 pub async fn dep_remove(cwd: &Path, from: &str, to: &str, dep_type: Option<String>) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
 
-    let mut issue = resolve_issue(&tracker, from)?.clone();
-    let target_id = resolve_issue(&tracker, to)?.id.clone();
+    let mut issue = resolve_issue(&skein, from)?.clone();
+    let target_id = resolve_issue(&skein, to)?.id.clone();
 
     let before = issue.dependencies.len();
     issue.dependencies.retain(|_, d| {
@@ -536,21 +536,21 @@ pub async fn dep_remove(cwd: &Path, from: &str, to: &str, dep_type: Option<Strin
 }
 
 pub async fn dep_list(cwd: &Path, query: &str) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let issue = resolve_issue(&tracker, query)?;
+    let issue = resolve_issue(&skein, query)?;
     for dep in issue.dependencies.values() {
-        let status = tracker
+        let status = skein
             .issues
             .get(&dep.depends_on_id)
             .map(|t| t.status.as_str())
             .unwrap_or("missing!");
         println!("outgoing  {} ({}) [{status}]", dep.depends_on_id, dep.dep_type);
     }
-    for dependent in dependents_of(&tracker, &issue.id) {
+    for dependent in dependents_of(&skein, &issue.id) {
         for dep in dependent.dependencies.values() {
             if dep.depends_on_id == issue.id {
                 println!(
@@ -566,12 +566,12 @@ pub async fn dep_list(cwd: &Path, query: &str) -> Result<()> {
 }
 
 pub async fn dep_cycles(cwd: &Path) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let cycles = dependency_cycles(&tracker);
+    let cycles = dependency_cycles(&skein);
     if cycles.is_empty() {
         println!("no cycles");
     } else {
@@ -600,12 +600,12 @@ fn print_listing(issues: &[&Issue]) {
 }
 
 pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let ready = ready_issues(&tracker);
+    let ready = ready_issues(&skein);
     if json {
         println!("{}", serde_json::to_string_pretty(&ready)?);
     } else {
@@ -615,12 +615,12 @@ pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
 }
 
 pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let blocked = blocked_issues(&tracker);
+    let blocked = blocked_issues(&skein);
     if json {
         let rows: Vec<serde_json::Value> = blocked
             .iter()
@@ -658,7 +658,7 @@ pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
     // Parse everything before touching the document: imports are atomic.
     let issues = crate::import::parse_jsonl(&text)?;
 
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
     // One transaction per issue: reads inside an automerge transaction
     // slow down as pending operations accumulate, so a single
@@ -675,18 +675,18 @@ pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
     })?;
     opened.push_and_close().await;
 
-    println!("imported {} issues from {}", issues.len(), path.display());
+    println!("imported {} strands from {}", issues.len(), path.display());
     Ok(())
 }
 
 pub async fn export(cwd: &Path) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
     // BTreeMap iteration is id-sorted already.
-    for issue in tracker.issues.values() {
+    for issue in skein.issues.values() {
         println!("{}", serde_json::to_string(issue)?);
     }
     Ok(())
@@ -717,14 +717,14 @@ fn issue_matches(issue: &Issue, needle_lower: &str) -> bool {
 }
 
 pub async fn search(cwd: &Path, needle: &str, json: bool) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
     let needle_lower = needle.to_lowercase();
     let mut found: Vec<&Issue> =
-        tracker.issues.values().filter(|i| issue_matches(i, &needle_lower)).collect();
+        skein.issues.values().filter(|i| issue_matches(i, &needle_lower)).collect();
     found.sort_by(|a, b| braid_core::domain::listing_order(a, b));
 
     if json {
@@ -752,17 +752,17 @@ pub fn agents_info() {
 /// Explicit bidirectional sync. Unlike other commands, being offline here
 /// is a hard failure: syncing is the entire point.
 pub async fn sync(cwd: &Path) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     if opened.conn.is_none() {
         let reason = opened.offline_reason.clone().unwrap_or_default();
         opened.close().await;
         bail!("offline: {reason}");
     }
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     let server = opened.cfg.sync_server.clone();
     opened.push_and_close().await;
-    println!("synced with {server} ({} issues)", tracker.issues.len());
+    println!("synced with {server} ({} strands)", skein.issues.len());
     Ok(())
 }
 
@@ -771,12 +771,12 @@ pub async fn sync(cwd: &Path) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 pub async fn list(cwd: &Path, status: Option<String>, json: bool) -> Result<()> {
-    let opened = open_tracker(cwd).await?;
+    let opened = open_skein(cwd).await?;
     opened.pull().await;
-    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let mut issues: Vec<&Issue> = tracker
+    let mut issues: Vec<&Issue> = skein
         .issues
         .values()
         .filter(|i| match &status {

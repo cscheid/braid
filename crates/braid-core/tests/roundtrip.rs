@@ -7,14 +7,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use automerge::{Automerge, ReadDoc};
 use braid_core::amdoc::{
-    delete_issue, hydrate, init_tracker, reconcile_issue, reconcile_tracker,
+    delete_issue, hydrate, init_skein, reconcile_issue, reconcile_skein,
 };
 use braid_core::schema::*;
 
-fn meta() -> TrackerMetadata {
-    TrackerMetadata {
+fn meta() -> SkeinMetadata {
+    SkeinMetadata {
         schema_version: SCHEMA_VERSION,
-        name: "test-tracker".into(),
+        name: "test-skein".into(),
         id_prefix: "br".into(),
         created_at: "2026-06-03T10:00:00.000000Z".into(),
     }
@@ -86,19 +86,19 @@ fn full_issue(id: &str) -> Issue {
     }
 }
 
-fn tracker_with(issues: Vec<Issue>) -> TrackerDoc {
-    TrackerDoc {
+fn skein_with(issues: Vec<Issue>) -> Skein {
+    Skein {
         metadata: meta(),
         issues: issues.into_iter().map(|i| (i.id.clone(), i)).collect(),
     }
 }
 
-/// Write a TrackerDoc into a fresh automerge document.
-fn materialize(tracker: &TrackerDoc) -> Automerge {
+/// Write a Skein into a fresh automerge document.
+fn materialize(skein: &Skein) -> Automerge {
     let mut doc = Automerge::new();
     doc.transact(|tx| {
-        init_tracker(tx, &tracker.metadata)?;
-        for issue in tracker.issues.values() {
+        init_skein(tx, &skein.metadata)?;
+        for issue in skein.issues.values() {
             reconcile_issue(tx, issue)?;
         }
         Ok::<_, braid_core::amdoc::ReconcileError>(())
@@ -109,27 +109,27 @@ fn materialize(tracker: &TrackerDoc) -> Automerge {
 }
 
 #[test]
-fn empty_tracker_round_trips() {
-    let tracker = tracker_with(vec![]);
-    let doc = materialize(&tracker);
+fn empty_skein_round_trips() {
+    let skein = skein_with(vec![]);
+    let doc = materialize(&skein);
     let back = hydrate(&doc).unwrap();
-    assert_eq!(back, tracker);
+    assert_eq!(back, skein);
 }
 
 #[test]
 fn minimal_issue_round_trips() {
-    let tracker = tracker_with(vec![minimal_issue("br-min001")]);
-    let doc = materialize(&tracker);
+    let skein = skein_with(vec![minimal_issue("br-min001")]);
+    let doc = materialize(&skein);
     let back = hydrate(&doc).unwrap();
-    assert_eq!(back, tracker);
+    assert_eq!(back, skein);
 }
 
 #[test]
 fn full_issue_round_trips() {
-    let tracker = tracker_with(vec![full_issue("br-full01"), minimal_issue("br-min001")]);
-    let doc = materialize(&tracker);
+    let skein = skein_with(vec![full_issue("br-full01"), minimal_issue("br-min001")]);
+    let doc = materialize(&skein);
     let back = hydrate(&doc).unwrap();
-    assert_eq!(back, tracker);
+    assert_eq!(back, skein);
 }
 
 #[test]
@@ -145,22 +145,22 @@ fn unknown_enum_values_round_trip() {
     };
     issue.dependencies.insert(dep.key(), dep);
 
-    let tracker = tracker_with(vec![issue]);
-    let doc = materialize(&tracker);
+    let skein = skein_with(vec![issue]);
+    let doc = materialize(&skein);
     let back = hydrate(&doc).unwrap();
-    assert_eq!(back, tracker);
+    assert_eq!(back, skein);
 }
 
 #[test]
 fn reconcile_is_idempotent() {
-    let tracker = tracker_with(vec![full_issue("br-full01")]);
-    let mut doc = materialize(&tracker);
+    let skein = skein_with(vec![full_issue("br-full01")]);
+    let mut doc = materialize(&skein);
     let heads_before = doc.get_heads();
 
     // Reconciling identical state must generate no operations at all.
     doc.transact(|tx| {
-        init_tracker(tx, &tracker.metadata)?;
-        for issue in tracker.issues.values() {
+        init_skein(tx, &skein.metadata)?;
+        for issue in skein.issues.values() {
             reconcile_issue(tx, issue)?;
         }
         Ok::<_, braid_core::amdoc::ReconcileError>(())
@@ -174,8 +174,8 @@ fn reconcile_is_idempotent() {
 #[test]
 fn text_field_is_updated_in_place_not_replaced() {
     let mut issue = full_issue("br-full01");
-    let tracker = tracker_with(vec![issue.clone()]);
-    let mut doc = materialize(&tracker);
+    let skein = skein_with(vec![issue.clone()]);
+    let mut doc = materialize(&skein);
 
     // Locate the automerge Text object backing `description`.
     let issues_obj = doc.get(automerge::ROOT, "issues").unwrap().unwrap().1;
@@ -202,7 +202,7 @@ fn text_field_is_updated_in_place_not_replaced() {
 #[test]
 fn optional_text_field_can_be_added_and_removed() {
     let mut issue = minimal_issue("br-min001");
-    let mut doc = materialize(&tracker_with(vec![issue.clone()]));
+    let mut doc = materialize(&skein_with(vec![issue.clone()]));
 
     // Add notes.
     issue.notes = Some("now with notes".into());
@@ -224,7 +224,7 @@ fn optional_text_field_can_be_added_and_removed() {
 #[test]
 fn labels_and_collections_reconcile_to_match() {
     let mut issue = full_issue("br-full01");
-    let mut doc = materialize(&tracker_with(vec![issue.clone()]));
+    let mut doc = materialize(&skein_with(vec![issue.clone()]));
 
     // Change labels (add one, drop one), drop a dependency, drop the comment.
     issue.labels = BTreeSet::from(["deps".to_string(), "urgent".to_string()]);
@@ -243,8 +243,8 @@ fn labels_and_collections_reconcile_to_match() {
 
 #[test]
 fn delete_issue_removes_it() {
-    let tracker = tracker_with(vec![minimal_issue("br-a"), minimal_issue("br-b")]);
-    let mut doc = materialize(&tracker);
+    let skein = skein_with(vec![minimal_issue("br-a"), minimal_issue("br-b")]);
+    let mut doc = materialize(&skein);
 
     let was_present = doc
         .transact(|tx| delete_issue(tx, "br-a"))
@@ -266,13 +266,13 @@ fn delete_issue_removes_it() {
 }
 
 #[test]
-fn reconcile_tracker_is_full_state_sync() {
-    let tracker = tracker_with(vec![minimal_issue("br-a"), minimal_issue("br-b")]);
-    let mut doc = materialize(&tracker);
+fn reconcile_skein_is_full_state_sync() {
+    let skein = skein_with(vec![minimal_issue("br-a"), minimal_issue("br-b")]);
+    let mut doc = materialize(&skein);
 
     // Desired state drops br-b and adds br-c.
-    let desired = tracker_with(vec![minimal_issue("br-a"), minimal_issue("br-c")]);
-    doc.transact(|tx| reconcile_tracker(tx, &desired))
+    let desired = skein_with(vec![minimal_issue("br-a"), minimal_issue("br-c")]);
+    doc.transact(|tx| reconcile_skein(tx, &desired))
         .map_err(|f| f.error)
         .unwrap();
 
@@ -291,7 +291,7 @@ fn hydrate_rejects_future_schema_version() {
     let mut bad_meta = meta();
     bad_meta.schema_version = SCHEMA_VERSION + 1;
     let mut doc = Automerge::new();
-    doc.transact(|tx| init_tracker(tx, &bad_meta))
+    doc.transact(|tx| init_skein(tx, &bad_meta))
         .map_err(|f| f.error)
         .unwrap();
     let err = hydrate(&doc).unwrap_err();
@@ -305,12 +305,12 @@ fn hydrate_rejects_future_schema_version() {
 }
 
 #[test]
-fn save_load_preserves_tracker() {
+fn save_load_preserves_skein() {
     // The document survives automerge's binary serialization (what samod
     // storage persists).
-    let tracker = tracker_with(vec![full_issue("br-full01")]);
-    let doc = materialize(&tracker);
+    let skein = skein_with(vec![full_issue("br-full01")]);
+    let doc = materialize(&skein);
     let bytes = doc.save();
     let loaded = Automerge::load(&bytes).unwrap();
-    assert_eq!(hydrate(&loaded).unwrap(), tracker);
+    assert_eq!(hydrate(&loaded).unwrap(), skein);
 }

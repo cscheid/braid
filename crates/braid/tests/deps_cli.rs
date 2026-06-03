@@ -7,19 +7,19 @@ use predicates::prelude::*;
 
 const DEAD_SERVER: &str = "tcp://127.0.0.1:1";
 
-struct Tracker {
+struct Skein {
     home: PathBuf,
     work: PathBuf,
 }
 
-impl Tracker {
-    fn new() -> (tempfile::TempDir, Tracker) {
+impl Skein {
+    fn new() -> (tempfile::TempDir, Skein) {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let work = tmp.path().join("work");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
-        let t = Tracker { home, work };
+        let t = Skein { home, work };
         t.braid()
             .args(["init", "--name", "deps", "--sync-server", DEAD_SERVER])
             .assert()
@@ -50,7 +50,7 @@ impl Tracker {
 
 #[test]
 fn dep_add_list_remove_round_trip() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let a = t.create(&["Issue A"]);
     let b = t.create(&["Issue B"]);
 
@@ -83,7 +83,7 @@ fn dep_add_list_remove_round_trip() {
 
 #[test]
 fn dep_add_validates_targets_and_self_edges() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let a = t.create(&["Lonely"]);
 
     t.braid()
@@ -101,7 +101,7 @@ fn dep_add_validates_targets_and_self_edges() {
 
 #[test]
 fn dep_add_warns_on_cycle_but_allows_it() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let a = t.create(&["A"]);
     let b = t.create(&["B"]);
 
@@ -124,7 +124,7 @@ fn dep_add_warns_on_cycle_but_allows_it() {
 
 #[test]
 fn dep_cycles_silent_when_acyclic() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let a = t.create(&["A"]);
     let b = t.create(&["B"]);
     t.braid().args(["dep", "add", &a, &b]).assert().success();
@@ -139,7 +139,7 @@ fn dep_cycles_silent_when_acyclic() {
 
 #[test]
 fn ready_and_blocked_listings() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let blocked = t.create(&["The blocked one"]);
     let blocker = t.create(&["The blocker"]);
     let free = t.create(&["The free one"]);
@@ -173,7 +173,7 @@ fn ready_and_blocked_listings() {
 
 #[test]
 fn ready_supports_json() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     t.create(&["Only issue"]);
     let out = t.braid().args(["ready", "--json"]).assert().success();
     let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
@@ -183,7 +183,7 @@ fn ready_supports_json() {
 
 #[test]
 fn parent_child_does_not_block_child_in_ready() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let epic = t.create(&["Epic", "--type", "epic"]);
     let child = t.create(&["Child task"]);
     t.braid()

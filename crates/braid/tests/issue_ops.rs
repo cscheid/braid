@@ -7,19 +7,19 @@ use predicates::prelude::*;
 
 const DEAD_SERVER: &str = "tcp://127.0.0.1:1";
 
-struct Tracker {
+struct Skein {
     home: PathBuf,
     work: PathBuf,
 }
 
-impl Tracker {
-    fn new() -> (tempfile::TempDir, Tracker) {
+impl Skein {
+    fn new() -> (tempfile::TempDir, Skein) {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let work = tmp.path().join("work");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
-        let t = Tracker { home, work };
+        let t = Skein { home, work };
         t.braid()
             .args(["init", "--name", "ops", "--sync-server", DEAD_SERVER])
             .assert()
@@ -50,7 +50,7 @@ impl Tracker {
 
 #[test]
 fn update_changes_fields_and_bumps_updated_at() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let id = t.create(&["Original title", "--description", "original description"]);
     let before = t.show_json(&id);
     assert_eq!(before["updated_at"], before["created_at"]);
@@ -94,7 +94,7 @@ fn update_changes_fields_and_bumps_updated_at() {
 
 #[test]
 fn update_empty_string_clears_optional_fields() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let id = t.create(&["Has extras", "--description", "to be removed", "--assignee", "x"]);
 
     t.braid()
@@ -109,7 +109,7 @@ fn update_empty_string_clears_optional_fields() {
 
 #[test]
 fn update_remove_label() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let id = t.create(&["Labeled", "--label", "keep", "--label", "drop"]);
 
     t.braid().args(["update", &id, "--remove-label", "drop"]).assert().success();
@@ -118,7 +118,7 @@ fn update_remove_label() {
 
 #[test]
 fn update_unknown_id_errors() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     t.create(&["Exists"]);
     t.braid()
         .args(["update", "zzz-nope", "--title", "x"])
@@ -129,7 +129,7 @@ fn update_unknown_id_errors() {
 
 #[test]
 fn close_sets_fields_and_filters_from_open() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let id = t.create(&["Done soon"]);
 
     t.braid()
@@ -150,7 +150,7 @@ fn close_sets_fields_and_filters_from_open() {
 
 #[test]
 fn close_accepts_multiple_ids() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let a = t.create(&["First"]);
     let b = t.create(&["Second"]);
 
@@ -161,7 +161,7 @@ fn close_accepts_multiple_ids() {
 
 #[test]
 fn close_with_open_children_is_refused_without_force() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let epic = t.create(&["The epic", "--type", "epic"]);
     let child = t.create(&["The child"]);
     t.braid()
@@ -188,7 +188,7 @@ fn close_with_open_children_is_refused_without_force() {
 
 #[test]
 fn reopen_clears_close_fields() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let id = t.create(&["Round trip"]);
     t.braid().args(["close", &id, "--reason", "oops"]).assert().success();
     t.braid().args(["reopen", &id]).assert().success();
@@ -201,7 +201,7 @@ fn reopen_clears_close_fields() {
 
 #[test]
 fn comments_append_and_render() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let id = t.create(&["Discussed"]);
 
     let out = t.braid().args(["comment", &id, "first comment"]).assert().success();

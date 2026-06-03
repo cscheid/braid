@@ -2,7 +2,7 @@
 //!
 //! Two directions:
 //!
-//! - **hydrate**: read an automerge document into a [`TrackerDoc`].
+//! - **hydrate**: read an automerge document into a [`Skein`].
 //! - **reconcile**: given desired hydrated state, mutate the document to
 //!   match — touching *only* what differs, so unchanged fields generate no
 //!   operations (keeps merges clean) and prose fields are updated via
@@ -30,15 +30,15 @@
 use automerge::{ObjId, ObjType, ReadDoc, ScalarValue, Value, transaction::Transactable};
 
 use crate::schema::{
-    Comment, Dependency, Issue, SCHEMA_VERSION, TrackerDoc, TrackerMetadata,
+    Comment, Dependency, Issue, SCHEMA_VERSION, Skein, SkeinMetadata,
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum HydrateError {
     #[error(transparent)]
     Automerge(#[from] automerge::AutomergeError),
-    #[error("document is not an initialized braid tracker: missing {0}")]
-    NotATracker(&'static str),
+    #[error("document is not an initialized braid skein: missing {0}")]
+    NotASkein(&'static str),
     #[error("unsupported schema_version {found} (this braid supports {supported})")]
     UnsupportedSchemaVersion { found: i64, supported: i64 },
     #[error("unexpected shape at {path}: expected {expected}")]
@@ -166,11 +166,11 @@ fn reconcile_text<T: Transactable>(
 // reconcile
 // ---------------------------------------------------------------------------
 
-/// Initialize (or re-assert) the tracker skeleton: `metadata` and the
+/// Initialize (or re-assert) the skein skeleton: `metadata` and the
 /// `issues` map. Idempotent: identical metadata generates no operations.
-pub fn init_tracker<T: Transactable>(
+pub fn init_skein<T: Transactable>(
     tx: &mut T,
-    meta: &TrackerMetadata,
+    meta: &SkeinMetadata,
 ) -> Result<(), ReconcileError> {
     let meta_obj = ensure_obj(tx, &automerge::ROOT, "metadata", ObjType::Map)?;
     put_int_if_changed(tx, &meta_obj, "schema_version", meta.schema_version)?;
@@ -272,28 +272,28 @@ pub fn reconcile_issue<T: Transactable>(tx: &mut T, issue: &Issue) -> Result<(),
     Ok(())
 }
 
-/// Make the document match `tracker` exactly: reconciles metadata and every
-/// issue, and **deletes issues not present in `tracker`**. Full-state sync,
+/// Make the document match `skein` exactly: reconciles metadata and every
+/// issue, and **deletes issues not present in `skein`**. Full-state sync,
 /// meant for import-style flows; day-to-day mutation should use
 /// [`reconcile_issue`].
-pub fn reconcile_tracker<T: Transactable>(
+pub fn reconcile_skein<T: Transactable>(
     tx: &mut T,
-    tracker: &TrackerDoc,
+    skein: &Skein,
 ) -> Result<(), ReconcileError> {
-    for (key, issue) in &tracker.issues {
+    for (key, issue) in &skein.issues {
         if *key != issue.id {
             return Err(ReconcileError::IdMismatch { key: key.clone(), id: issue.id.clone() });
         }
     }
-    init_tracker(tx, &tracker.metadata)?;
+    init_skein(tx, &skein.metadata)?;
     let issues_obj = ensure_obj(tx, &automerge::ROOT, "issues", ObjType::Map)?;
     let current: Vec<String> = tx.keys(&issues_obj).collect();
     for k in &current {
-        if !tracker.issues.contains_key(k) {
+        if !skein.issues.contains_key(k) {
             tx.delete(&issues_obj, k.as_str())?;
         }
     }
-    for issue in tracker.issues.values() {
+    for issue in skein.issues.values() {
         reconcile_issue(tx, issue)?;
     }
     Ok(())
@@ -410,10 +410,10 @@ fn req_text<R: ReadDoc>(
 // ---------------------------------------------------------------------------
 
 /// Read the whole document into hydrated form.
-pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<TrackerDoc, HydrateError> {
+pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<Skein, HydrateError> {
     let Some((Value::Object(ObjType::Map), meta_obj)) = doc.get(automerge::ROOT, "metadata")?
     else {
-        return Err(HydrateError::NotATracker("metadata"));
+        return Err(HydrateError::NotASkein("metadata"));
     };
     let schema_version = req_int(doc, &meta_obj, "schema_version", "metadata")?;
     if schema_version != SCHEMA_VERSION {
@@ -422,7 +422,7 @@ pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<TrackerDoc, HydrateError> {
             supported: SCHEMA_VERSION,
         });
     }
-    let metadata = TrackerMetadata {
+    let metadata = SkeinMetadata {
         schema_version,
         name: req_str(doc, &meta_obj, "name", "metadata")?,
         id_prefix: req_str(doc, &meta_obj, "id_prefix", "metadata")?,
@@ -431,7 +431,7 @@ pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<TrackerDoc, HydrateError> {
 
     let Some((Value::Object(ObjType::Map), issues_obj)) = doc.get(automerge::ROOT, "issues")?
     else {
-        return Err(HydrateError::NotATracker("issues"));
+        return Err(HydrateError::NotASkein("issues"));
     };
 
     let mut issues = std::collections::BTreeMap::new();
@@ -443,7 +443,7 @@ pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<TrackerDoc, HydrateError> {
         issues.insert(key, issue);
     }
 
-    Ok(TrackerDoc { metadata, issues })
+    Ok(Skein { metadata, issues })
 }
 
 fn hydrate_issue<R: ReadDoc>(doc: &R, obj: &ObjId, path: &str) -> Result<Issue, HydrateError> {

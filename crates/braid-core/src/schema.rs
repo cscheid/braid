@@ -1,4 +1,4 @@
-//! The braid tracker document schema, in hydrated (plain Rust) form.
+//! The braid skein document schema, in hydrated (plain Rust) form.
 //!
 //! These types mirror the automerge document shape one-to-one (see the
 //! design doc's "Document schema" section). Prose fields that are automerge
@@ -22,19 +22,19 @@ use std::collections::{BTreeMap, BTreeSet};
 /// compatibility gate that lets us evolve the shape later).
 pub const SCHEMA_VERSION: i64 = 1;
 
-/// A whole tracker: one automerge document.
+/// A whole skein: one automerge document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrackerDoc {
-    pub metadata: TrackerMetadata,
+pub struct Skein {
+    pub metadata: SkeinMetadata,
     /// Keyed by issue id; each value's `id` field duplicates its key so
     /// issue objects are self-contained.
     pub issues: BTreeMap<String, Issue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrackerMetadata {
+pub struct SkeinMetadata {
     pub schema_version: i64,
-    /// Display name for the tracker.
+    /// Display name for the skein.
     pub name: String,
     /// Prefix for generated issue ids (without the trailing dash), e.g. "br".
     pub id_prefix: String,

@@ -16,11 +16,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use automerge::Automerge;
-use braid_core::amdoc::{delete_issue, hydrate, init_tracker, reconcile_issue};
+use braid_core::amdoc::{delete_issue, hydrate, init_skein, reconcile_issue};
 use braid_core::schema::*;
 
-fn meta() -> TrackerMetadata {
-    TrackerMetadata {
+fn meta() -> SkeinMetadata {
+    SkeinMetadata {
         schema_version: SCHEMA_VERSION,
         name: "merge-tests".into(),
         id_prefix: "br".into(),
@@ -56,7 +56,7 @@ fn issue(id: &str) -> Issue {
 fn base_and_forks(issues: Vec<Issue>) -> (Automerge, Automerge) {
     let mut doc = Automerge::new();
     doc.transact(|tx| {
-        init_tracker(tx, &meta())?;
+        init_skein(tx, &meta())?;
         for i in &issues {
             reconcile_issue(tx, i)?;
         }
@@ -77,7 +77,7 @@ fn apply(doc: &mut Automerge, issue: &Issue) {
 
 /// Merge in both directions and assert both replicas hydrate identically.
 /// Returns the converged state.
-fn converge(alice: &mut Automerge, bob: &mut Automerge) -> TrackerDoc {
+fn converge(alice: &mut Automerge, bob: &mut Automerge) -> Skein {
     alice.merge(bob).unwrap();
     bob.merge(alice).unwrap();
     let a = hydrate(alice).unwrap();

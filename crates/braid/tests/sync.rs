@@ -94,7 +94,7 @@ fn list_json(clone: &Clone_) -> serde_json::Value {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn fresh_clone_fetches_tracker_from_server() {
+async fn fresh_clone_fetches_skein_from_server() {
     let tmp = tempfile::tempdir().unwrap();
     let server = TestServer::start().await;
 
@@ -169,7 +169,7 @@ async fn sync_command_fetches_and_reports() {
         .arg("sync")
         .assert()
         .success()
-        .stdout(predicate::str::contains("2 issue"));
+        .stdout(predicate::str::contains("2 strand"));
 
     server.stop().await;
 }

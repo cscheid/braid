@@ -6,18 +6,18 @@ use predicates::prelude::*;
 
 const DEAD_SERVER: &str = "tcp://127.0.0.1:1";
 
-struct Tracker {
+struct Skein {
     home: PathBuf,
     work: PathBuf,
 }
 
-impl Tracker {
-    fn new_at(tmp: &std::path::Path, name: &str) -> Tracker {
+impl Skein {
+    fn new_at(tmp: &std::path::Path, name: &str) -> Skein {
         let home = tmp.join(format!("{name}-home"));
         let work = tmp.join(format!("{name}-work"));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
-        let t = Tracker { home, work };
+        let t = Skein { home, work };
         t.braid()
             .args(["init", "--name", name, "--sync-server", DEAD_SERVER])
             .assert()
@@ -56,7 +56,7 @@ const BEADS_JSONL: &str = concat!(
 #[test]
 fn import_beads_jsonl_maps_fields() {
     let tmp = tempfile::tempdir().unwrap();
-    let t = Tracker::new_at(tmp.path(), "imp");
+    let t = Skein::new_at(tmp.path(), "imp");
     let jsonl = t.work.join("issues.jsonl");
     std::fs::write(&jsonl, BEADS_JSONL).unwrap();
 
@@ -104,7 +104,7 @@ fn import_beads_jsonl_maps_fields() {
 #[test]
 fn import_is_an_upsert() {
     let tmp = tempfile::tempdir().unwrap();
-    let t = Tracker::new_at(tmp.path(), "imp");
+    let t = Skein::new_at(tmp.path(), "imp");
     let jsonl = t.work.join("issues.jsonl");
     std::fs::write(&jsonl, BEADS_JSONL).unwrap();
 
@@ -123,7 +123,7 @@ fn import_is_an_upsert() {
 #[test]
 fn import_rejects_malformed_lines_atomically() {
     let tmp = tempfile::tempdir().unwrap();
-    let t = Tracker::new_at(tmp.path(), "imp");
+    let t = Skein::new_at(tmp.path(), "imp");
     let jsonl = t.work.join("bad.jsonl");
     std::fs::write(&jsonl, format!("{BEADS_JSONL}this is not json\n")).unwrap();
 
@@ -142,7 +142,7 @@ fn import_rejects_malformed_lines_atomically() {
 #[test]
 fn export_emits_jsonl_sorted_by_id() {
     let tmp = tempfile::tempdir().unwrap();
-    let t = Tracker::new_at(tmp.path(), "exp");
+    let t = Skein::new_at(tmp.path(), "exp");
     let jsonl = t.work.join("issues.jsonl");
     std::fs::write(&jsonl, BEADS_JSONL).unwrap();
     t.braid().args(["import", jsonl.to_str().unwrap()]).assert().success();
@@ -160,7 +160,7 @@ fn export_emits_jsonl_sorted_by_id() {
 #[test]
 fn export_import_round_trips_exactly() {
     let tmp = tempfile::tempdir().unwrap();
-    let a = Tracker::new_at(tmp.path(), "a");
+    let a = Skein::new_at(tmp.path(), "a");
     let jsonl = a.work.join("issues.jsonl");
     std::fs::write(&jsonl, BEADS_JSONL).unwrap();
     a.braid().args(["import", jsonl.to_str().unwrap()]).assert().success();
@@ -168,8 +168,8 @@ fn export_import_round_trips_exactly() {
     let exported = a.braid().arg("export").assert().success();
     let exported = String::from_utf8(exported.get_output().stdout.clone()).unwrap();
 
-    // import A's export into a brand-new tracker B
-    let b = Tracker::new_at(tmp.path(), "b");
+    // import A's export into a brand-new skein B
+    let b = Skein::new_at(tmp.path(), "b");
     let exp_file = b.work.join("export.jsonl");
     std::fs::write(&exp_file, &exported).unwrap();
     b.braid().args(["import", exp_file.to_str().unwrap()]).assert().success();

@@ -27,7 +27,7 @@ fn braid(cwd: &Path, home: &Path) -> assert_cmd::Command {
 }
 
 /// init in `dir`, returning the doc id parsed from `.braid.toml`.
-fn init_tracker(dir: &Path, home: &Path) -> String {
+fn init_skein(dir: &Path, home: &Path) -> String {
     braid(dir, home)
         .args(["init", "--name", "test-project", "--sync-server", DEAD_SERVER])
         .assert()
@@ -82,7 +82,7 @@ fn init_twice_fails() {
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
 
-    init_tracker(&work, &home);
+    init_skein(&work, &home);
     braid(&work, &home)
         .arg("init")
         .assert()
@@ -113,7 +113,7 @@ fn create_show_list_round_trip() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    init_tracker(&work, &home);
+    init_skein(&work, &home);
 
     let id = create_issue(
         &work,
@@ -167,7 +167,7 @@ fn create_json_outputs_full_issue() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    init_tracker(&work, &home);
+    init_skein(&work, &home);
 
     let out = braid(&work, &home)
         .args(["create", "JSON output test", "--json"])
@@ -185,7 +185,7 @@ fn slug_appears_in_generated_id() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    init_tracker(&work, &home);
+    init_skein(&work, &home);
 
     let id = create_issue(&work, &home, &["Slugged issue", "--slug", "My Slug!"]);
     assert!(id.starts_with("br-my-slug-"), "got {id}");
@@ -198,7 +198,7 @@ fn list_status_filter_and_json() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    init_tracker(&work, &home);
+    init_skein(&work, &home);
 
     create_issue(&work, &home, &["First issue"]);
     create_issue(&work, &home, &["Second issue", "--priority", "0"]);
@@ -249,7 +249,7 @@ fn unknown_doc_id_not_in_cache_mentions_sync() {
     // initializing a *different* directory, then pointing at a fresh HOME.
     let other = tmp.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
-    let foreign_doc_id = init_tracker(&other, &home);
+    let foreign_doc_id = init_skein(&other, &home);
 
     let fresh_home = tmp.path().join("home2");
     std::fs::create_dir_all(&fresh_home).unwrap();
@@ -293,7 +293,7 @@ fn show_unknown_and_ambiguous_ids_error() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    init_tracker(&work, &home);
+    init_skein(&work, &home);
 
     create_issue(&work, &home, &["First"]);
     create_issue(&work, &home, &["Second"]);
@@ -320,10 +320,10 @@ fn init_join_adopts_existing_doc_id() {
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
 
-    // Create a tracker elsewhere to obtain a valid doc id that's in cache.
+    // Create a skein elsewhere to obtain a valid doc id that's in cache.
     let other = tmp.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
-    let doc_id = init_tracker(&other, &home);
+    let doc_id = init_skein(&other, &home);
 
     braid(&work, &home)
         .args(["init", "--join", &doc_id, "--sync-server", DEAD_SERVER])
@@ -333,11 +333,11 @@ fn init_join_adopts_existing_doc_id() {
     let secret = std::fs::read_to_string(work.join(".braid.toml")).unwrap();
     assert!(secret.contains(&doc_id));
 
-    // Same HOME → same cache → the joined tracker is usable immediately.
-    create_issue(&work, &home, &["Issue in joined tracker"]);
+    // Same HOME → same cache → the joined skein is usable immediately.
+    create_issue(&work, &home, &["Issue in joined skein"]);
     braid(&other, &home)
         .arg("list")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Issue in joined tracker"));
+        .stdout(predicate::str::contains("Issue in joined skein"));
 }

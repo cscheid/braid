@@ -6,19 +6,19 @@ use predicates::prelude::*;
 
 const DEAD_SERVER: &str = "tcp://127.0.0.1:1";
 
-struct Tracker {
+struct Skein {
     home: PathBuf,
     work: PathBuf,
 }
 
-impl Tracker {
-    fn new() -> (tempfile::TempDir, Tracker) {
+impl Skein {
+    fn new() -> (tempfile::TempDir, Skein) {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let work = tmp.path().join("work");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
-        let t = Tracker { home, work };
+        let t = Skein { home, work };
         t.braid()
             .args(["init", "--name", "search", "--sync-server", DEAD_SERVER])
             .assert()
@@ -44,7 +44,7 @@ impl Tracker {
 
 #[test]
 fn search_matches_title_description_labels_and_comments() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let by_title = t.create(&["Fix the CRLF handling"]);
     let by_desc = t.create(&["Other thing", "--description", "involves crlf too"]);
     let by_label = t.create(&["Labeled thing", "--label", "crlf-stuff"]);
@@ -62,7 +62,7 @@ fn search_matches_title_description_labels_and_comments() {
 
 #[test]
 fn search_is_case_insensitive_and_supports_json() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     let id = t.create(&["MIXED case TItle"]);
 
     let out = t.braid().args(["search", "mixed CASE", "--json"]).assert().success();
@@ -73,7 +73,7 @@ fn search_is_case_insensitive_and_supports_json() {
 
 #[test]
 fn search_with_no_matches_is_empty_success() {
-    let (_tmp, t) = Tracker::new();
+    let (_tmp, t) = Skein::new();
     t.create(&["Something"]);
     let out = t.braid().args(["search", "zzzznothing"]).assert().success();
     assert!(String::from_utf8(out.get_output().stdout.clone()).unwrap().trim().is_empty());
@@ -81,7 +81,7 @@ fn search_with_no_matches_is_empty_success() {
 
 #[test]
 fn agents_info_prints_guide_without_any_config() {
-    // agents-info must work anywhere — no tracker, no secret, no network.
+    // agents-info must work anywhere — no skein, no secret, no network.
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).unwrap();

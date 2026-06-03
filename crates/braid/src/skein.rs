@@ -1,4 +1,4 @@
-//! Opening a tracker: config → cache storage → samod repo → dial → DocHandle.
+//! Opening a skein: config → cache storage → samod repo → dial → DocHandle.
 //!
 //! Per design decision D2, every command syncs per-invocation: dial the
 //! configured server (bounded by a timeout), exchange, exit. When the
@@ -13,7 +13,7 @@ use crate::cache;
 use crate::config::{self, ResolvedConfig};
 use crate::sync::{Connect, connect, sync_timeout};
 
-pub struct OpenedTracker {
+pub struct OpenedSkein {
     pub cfg: ResolvedConfig,
     pub repo: Repo,
     pub doc: DocHandle,
@@ -57,9 +57,9 @@ pub async fn open_repo() -> Result<Repo> {
 }
 
 /// Resolve config from `cwd`, dial the configured server (offline
-/// tolerated), and load the tracker document — from the cache or, failing
+/// tolerated), and load the skein document — from the cache or, failing
 /// that, from the server.
-pub async fn open_tracker(cwd: &Path) -> Result<OpenedTracker> {
+pub async fn open_skein(cwd: &Path) -> Result<OpenedSkein> {
     let cfg = config::load(cwd)?;
     let doc_id: DocumentId = cfg.doc_id.parse().map_err(|e| {
         anyhow!(
@@ -80,19 +80,19 @@ pub async fn open_tracker(cwd: &Path) -> Result<OpenedTracker> {
     // With an established connection, `find` asks the server for documents
     // missing from the cache.
     match repo.find(doc_id).await {
-        Ok(Some(doc)) => Ok(OpenedTracker { cfg, repo, doc, conn, offline_reason }),
+        Ok(Some(doc)) => Ok(OpenedSkein { cfg, repo, doc, conn, offline_reason }),
         Ok(None) => {
             if conn.is_some() {
                 bail!(
-                    "tracker document {} was not found in the local cache, and {} \
+                    "skein document {} was not found in the local cache, and {} \
                      does not have it either.\nCheck the doc_id, or run `braid sync` \
-                     from a machine that has the tracker.",
+                     from a machine that has the skein.",
                     cfg.doc_id,
                     cfg.sync_server
                 )
             } else {
                 bail!(
-                    "tracker document {} is not in the local cache and the sync \
+                    "skein document {} is not in the local cache and the sync \
                      server is unreachable.\nReconnect and retry, or check the doc_id.",
                     cfg.doc_id
                 )
@@ -102,7 +102,7 @@ pub async fn open_tracker(cwd: &Path) -> Result<OpenedTracker> {
     }
 }
 
-impl OpenedTracker {
+impl OpenedSkein {
     /// Wait (bounded) until everything the server has is local. No-op when
     /// offline. Call before reading.
     pub async fn pull(&self) {

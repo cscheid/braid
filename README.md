@@ -3,12 +3,13 @@
 An automerge-centric issue tracker for LLM agents (and the humans they work
 with).
 
-braid stores a whole issue tracker in a single
+braid stores a project's issues in a **skein**: a single
 [automerge](https://automerge.org) CRDT document, synced through an
-automerge sync server. There is no git involvement and no daemon: any
-number of agents across machines, branches, and worktrees can create,
-edit, and close issues in parallel — replication and conflict resolution
-come from the CRDT, not from merge tooling.
+automerge sync server. A single issue is a **strand** (full vocabulary:
+[docs/terminology.md](docs/terminology.md)). There is no git involvement
+and no daemon: any number of agents across machines, branches, and
+worktrees can create, edit, and close strands in parallel — replication
+and conflict resolution come from the CRDT, not from merge tooling.
 
 braid is heavily inspired by [beads](https://github.com/steveyegge/beads):
 it borrows the issue shape, dependency types, and ready/blocked workflow,
@@ -20,7 +21,7 @@ it.)
 
 ```sh
 # in your project directory
-braid init                  # creates a tracker, writes .braid.toml
+braid init                  # creates a skein, writes .braid.toml
 echo .braid.toml >> .gitignore
 
 braid create "Fix the frobnicator" --type bug --priority 1
@@ -42,7 +43,7 @@ it).
 ## ⚠️ The document id is a secret
 
 The automerge document id is a **bearer token**: anyone who has it can
-read *and write* your tracker, forever. Treat it like a credential:
+read *and write* your skein, forever. Treat it like a credential:
 
 - never commit `.braid.toml` (gitignore it; `braid init` reminds you)
 - never paste the doc id into issue text, logs, commits, or PRs
@@ -56,7 +57,7 @@ Keyhive/Beelay — will eventually improve this story upstream.)
 
 ## Configuration
 
-braid resolves its tracker per-field, first hit wins:
+braid resolves its skein per-field, first hit wins:
 
 1. **Environment**: `BRAID_DOC_ID`, `BRAID_SYNC_URL`, `BRAID_AUTHOR`
 2. **Repo file**: a gitignored `.braid.toml` in the current directory or
@@ -130,4 +131,6 @@ cargo clippy --workspace --all-targets
 The workspace has two crates: `braid-core` (schema, automerge
 hydrate/reconcile, ready/blocked logic — no I/O) and `braid` (CLI, config
 discovery, cache, sync). Design decisions and phase history live in
-`claude-notes/plans/2026/06/03/braid-design-kickoff.md`.
+`claude-notes/plans/2026/06/03/braid-design-kickoff.md`; vocabulary in
+`docs/terminology.md`. This repo dogfoods braid — run `braid list` here
+to see its own skein.

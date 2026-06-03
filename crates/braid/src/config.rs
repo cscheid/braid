@@ -78,12 +78,12 @@ pub struct ResolvedConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error(
-        "no tracker configured: could not find a document id.\n\
+        "no skein configured: could not find a document id.\n\
          braid looks for one in (first hit wins):\n\
          1. the BRAID_DOC_ID environment variable\n\
          2. a .braid.toml file in this directory or any parent\n\
          3. ~/.config/braid/projects.toml, selected by a .braid-project marker file\n\
-         Run `braid init` to create a new tracker here, or\n\
+         Run `braid init` to create a new skein here, or\n\
          `braid init --join <doc-id>` to adopt an existing one."
     )]
     NoDocId,
