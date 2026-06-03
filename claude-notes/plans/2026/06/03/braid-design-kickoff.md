@@ -298,12 +298,17 @@ Cargo workspace:
 - [x] Cargo workspace: `braid-core`, `braid` (CLI)
 - [x] Pin samod 0.10 + automerge 0.9; evaluate autosurgeon vs. manual
       hydrate/reconcile → **manual** (version conflict; see D14)
-- [ ] Tests: hydrate/reconcile round-trip for the full Issue shape,
+- [x] Tests: hydrate/reconcile round-trip for the full Issue shape,
       including Text fields and map-shaped labels/deps/comments
-- [ ] Tests: concurrent-merge semantics (two forks of a doc; edit same
+      (13 tests in `tests/roundtrip.rs`; reconcile is idempotent and
+      touches only what differs; Text spliced in place via `update_text`)
+- [x] Tests: concurrent-merge semantics (two forks of a doc; edit same
       description → interleaved; same scalar → LWW; same logical dep edge
-      added twice → single entry)
-- [ ] id-gen module + collision-probability tests
+      added twice → single entry) — 10 tests in `tests/merge.rs`, including
+      two pinning tests: **delete wins over concurrent edit**, and
+      concurrent same-id creation converges with one object winning
+- [x] id-gen module + collision-probability tests (`src/id.rs`: 8-char
+      base36 suffix, optional slug, seeded deterministic collision test)
 
 ### Phase 1 — config, cache, local-only tracker
 
