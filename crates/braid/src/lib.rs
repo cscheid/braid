@@ -4,4 +4,6 @@
 //! it directly; `main.rs` is a thin clap dispatcher.
 
 pub mod cache;
+pub mod commands;
 pub mod config;
+pub mod tracker;

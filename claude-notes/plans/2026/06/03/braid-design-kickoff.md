@@ -312,13 +312,19 @@ Cargo workspace:
 
 ### Phase 1 — config, cache, local-only tracker
 
-- [ ] Layered secret discovery (env > `.braid.toml` walk-up > user config)
-      + identity resolution (D12), with table-driven tests
-- [ ] Hashed-dirname cache `Storage` adapter (D9) + permission handling +
-      `--no-cache`
-- [ ] `br init` (create doc locally, print secret), `br create`, `br show`,
-      `br list` — all working offline against the cache
-- [ ] Error story for missing/invalid secret
+- [x] Layered secret discovery (env > `.braid.toml` walk-up > user config)
+      + identity resolution (D12), with table-driven tests (16 tests,
+      `braid/src/config.rs`)
+- [x] Hashed-dirname cache `Storage` adapter (D9) + permission handling
+      (8 tests incl. no-doc-id-on-disk walk; `braid/src/cache.rs`).
+      `--no-cache` deferred to Phase 2: stateless invocations are
+      meaningless without a network to sync from.
+- [x] `br init` (create doc locally, write/print secret, `--join`),
+      `br create`, `br show`, `br list` — all working offline against the
+      cache (12 e2e tests, `braid/tests/cli.rs`; manual smoke verified
+      cache paths contain only hashes)
+- [x] Error story for missing/invalid secret (NoDocId guidance, invalid
+      doc_id format, not-in-cache message pointing at Phase 2 sync)
 
 ### Phase 2 — sync
 
