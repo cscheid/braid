@@ -66,6 +66,8 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Sync with the configured server (fails if unreachable)
+    Sync,
 }
 
 #[tokio::main]
@@ -102,6 +104,7 @@ async fn main() {
         }
         Cmd::Show { id, json } => commands::show(&cwd, &id, json).await,
         Cmd::List { status, json } => commands::list(&cwd, status, json).await,
+        Cmd::Sync => commands::sync(&cwd).await,
     };
 
     if let Err(e) = result {

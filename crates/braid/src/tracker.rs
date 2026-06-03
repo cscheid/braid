@@ -1,20 +1,26 @@
-//! Opening a tracker: config → cache storage → samod repo → DocHandle.
+//! Opening a tracker: config → cache storage → samod repo → dial → DocHandle.
 //!
-//! Phase 1 is local-only: the repo has no dialers, so `find` resolves
-//! purely from the cache. Phase 2 adds the per-invocation dial/sync here.
+//! Per design decision D2, every command syncs per-invocation: dial the
+//! configured server (bounded by a timeout), exchange, exit. When the
+//! server is unreachable, commands fall back to the local cache and warn.
 
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
-use samod::{DocHandle, DocumentId, Repo};
+use samod::{ConnectionId, DocHandle, DocumentId, Repo};
 
 use crate::cache;
 use crate::config::{self, ResolvedConfig};
+use crate::sync::{Connect, connect, sync_timeout};
 
 pub struct OpenedTracker {
     pub cfg: ResolvedConfig,
     pub repo: Repo,
     pub doc: DocHandle,
+    /// Established server connection, if any.
+    pub conn: Option<ConnectionId>,
+    /// Why we're offline, when we are.
+    pub offline_reason: Option<String>,
 }
 
 fn env(k: &str) -> Option<String> {
@@ -29,12 +35,30 @@ pub fn open_cache() -> Result<cache::HashedKeyStorage<samod::storage::TokioFiles
         .with_context(|| format!("cannot open braid cache at {}", dir.display()))
 }
 
-/// Build a samod repo over the cache, with no network connections.
+/// Build a samod repo over the cache, with no network connections (used by
+/// `init`, which creates the document before any secret exists on disk).
+///
+/// `BRAID_NO_CACHE=1` selects in-memory storage instead: fully stateless
+/// invocations that fetch everything from the server and persist nothing
+/// (D9). Useless offline, by construction.
 pub async fn open_repo() -> Result<Repo> {
-    Ok(Repo::build_tokio().with_storage(open_cache()?).load().await)
+    let no_cache = std::env::var("BRAID_NO_CACHE").is_ok_and(|v| {
+        let v = v.trim();
+        !v.is_empty() && v != "0"
+    });
+    if no_cache {
+        Ok(Repo::build_tokio()
+            .with_storage(samod::storage::InMemoryStorage::new())
+            .load()
+            .await)
+    } else {
+        Ok(Repo::build_tokio().with_storage(open_cache()?).load().await)
+    }
 }
 
-/// Resolve config from `cwd` and load its tracker document from the cache.
+/// Resolve config from `cwd`, dial the configured server (offline
+/// tolerated), and load the tracker document — from the cache or, failing
+/// that, from the server.
 pub async fn open_tracker(cwd: &Path) -> Result<OpenedTracker> {
     let cfg = config::load(cwd)?;
     let doc_id: DocumentId = cfg.doc_id.parse().map_err(|e| {
@@ -44,14 +68,73 @@ pub async fn open_tracker(cwd: &Path) -> Result<OpenedTracker> {
         )
     })?;
     let repo = open_repo().await?;
+
+    let (conn, offline_reason) = match connect(&repo, &cfg.sync_server, sync_timeout()).await? {
+        Connect::Connected { conn, .. } => (Some(conn), None),
+        Connect::Offline(reason) => {
+            eprintln!("braid: offline ({reason}); using the local cache");
+            (None, Some(reason))
+        }
+    };
+
+    // With an established connection, `find` asks the server for documents
+    // missing from the cache.
     match repo.find(doc_id).await {
-        Ok(Some(doc)) => Ok(OpenedTracker { cfg, repo, doc }),
-        Ok(None) => bail!(
-            "tracker document {} is not in the local cache.\n\
-             This machine has not synced it yet — `braid sync` (Phase 2) will \
-             fetch it from the sync server — or the doc_id is wrong.",
-            cfg.doc_id
-        ),
+        Ok(Some(doc)) => Ok(OpenedTracker { cfg, repo, doc, conn, offline_reason }),
+        Ok(None) => {
+            if conn.is_some() {
+                bail!(
+                    "tracker document {} was not found in the local cache, and {} \
+                     does not have it either.\nCheck the doc_id, or run `braid sync` \
+                     from a machine that has the tracker.",
+                    cfg.doc_id,
+                    cfg.sync_server
+                )
+            } else {
+                bail!(
+                    "tracker document {} is not in the local cache and the sync \
+                     server is unreachable.\nReconnect and retry, or check the doc_id.",
+                    cfg.doc_id
+                )
+            }
+        }
         Err(_) => bail!("samod repo stopped unexpectedly"),
+    }
+}
+
+impl OpenedTracker {
+    /// Wait (bounded) until everything the server has is local. No-op when
+    /// offline. Call before reading.
+    pub async fn pull(&self) {
+        if let Some(conn) = self.conn {
+            let _ = tokio::time::timeout(sync_timeout(), self.doc.we_have_their_changes(conn))
+                .await;
+        }
+    }
+
+    /// Wait (bounded) until the server has everything local, then shut the
+    /// repo down (flushing the cache). Call after writing.
+    pub async fn push_and_close(self) {
+        if let Some(conn) = self.conn {
+            let confirmed = tokio::time::timeout(
+                sync_timeout(),
+                self.doc.they_have_our_changes(conn),
+            )
+            .await
+            .is_ok();
+            if !confirmed {
+                eprintln!(
+                    "braid: changes saved locally, but the server did not confirm \
+                     receipt in time; run `braid sync` later to be sure"
+                );
+            }
+        }
+        self.repo.stop().await;
+    }
+
+    /// Shut down without a write barrier (flushes the cache). Call after
+    /// read-only commands.
+    pub async fn close(self) {
+        self.repo.stop().await;
     }
 }

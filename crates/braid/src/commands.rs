@@ -14,6 +14,7 @@ use braid_core::time::now_rfc3339;
 use samod::DocumentId;
 
 use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME};
+use crate::sync::{Connect, connect, sync_timeout};
 use crate::tracker::{open_repo, open_tracker};
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,32 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
                 .await
                 .map_err(|_| anyhow!("samod repo stopped unexpectedly"))?;
             let id = handle.document_id().to_string();
+
+            // Best-effort announce to the sync server (D13: init works
+            // offline; the doc reaches the server on first successful sync).
+            match connect(&repo, &sync_server, sync_timeout()).await? {
+                Connect::Connected { conn, .. } => {
+                    let confirmed =
+                        tokio::time::timeout(sync_timeout(), handle.they_have_our_changes(conn))
+                            .await
+                            .is_ok();
+                    if confirmed {
+                        println!("announced new tracker to {sync_server}");
+                    } else {
+                        eprintln!(
+                            "braid: created locally; {sync_server} did not confirm receipt \
+                             in time — run `braid sync` later"
+                        );
+                    }
+                }
+                Connect::Offline(reason) => {
+                    eprintln!(
+                        "braid: created locally; server unreachable ({reason}) — the \
+                         tracker will be announced on the first successful `braid sync`"
+                    );
+                }
+            }
+
             // Wait for the document to be flushed to the cache.
             repo.stop().await;
             id
@@ -124,6 +151,7 @@ pub struct CreateOpts {
 
 pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
     let opened = open_tracker(cwd).await?;
+    opened.pull().await;
     let tracker = opened.doc.with_document(|d| hydrate(d))?;
 
     let mut id = new_issue_id(&tracker.metadata.id_prefix, opts.slug.as_deref());
@@ -159,7 +187,7 @@ pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
     opened
         .doc
         .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
-    opened.repo.stop().await;
+    opened.push_and_close().await;
 
     if opts.json {
         println!("{}", serde_json::to_string_pretty(&issue)?);
@@ -193,8 +221,9 @@ pub fn resolve_issue<'t>(tracker: &'t TrackerDoc, query: &str) -> Result<&'t Iss
 
 pub async fn show(cwd: &Path, query: &str, json: bool) -> Result<()> {
     let opened = open_tracker(cwd).await?;
+    opened.pull().await;
     let tracker = opened.doc.with_document(|d| hydrate(d))?;
-    opened.repo.stop().await;
+    opened.close().await;
 
     let issue = resolve_issue(&tracker, query)?;
     if json {
@@ -242,13 +271,35 @@ fn format_issue(issue: &Issue) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// sync
+// ---------------------------------------------------------------------------
+
+/// Explicit bidirectional sync. Unlike other commands, being offline here
+/// is a hard failure: syncing is the entire point.
+pub async fn sync(cwd: &Path) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    if opened.conn.is_none() {
+        let reason = opened.offline_reason.clone().unwrap_or_default();
+        opened.close().await;
+        bail!("offline: {reason}");
+    }
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let server = opened.cfg.sync_server.clone();
+    opened.push_and_close().await;
+    println!("synced with {server} ({} issues)", tracker.issues.len());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // list
 // ---------------------------------------------------------------------------
 
 pub async fn list(cwd: &Path, status: Option<String>, json: bool) -> Result<()> {
     let opened = open_tracker(cwd).await?;
+    opened.pull().await;
     let tracker = opened.doc.with_document(|d| hydrate(d))?;
-    opened.repo.stop().await;
+    opened.close().await;
 
     let mut issues: Vec<&Issue> = tracker
         .issues

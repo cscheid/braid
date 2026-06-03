@@ -328,13 +328,25 @@ Cargo workspace:
 
 ### Phase 2 — sync
 
-- [ ] Per-invocation dial → sync → exit, with timeout + offline fallback
-- [ ] Integration tests against an in-process samod server (channel
-      transport / tincans pattern from samod's test suite)
-- [ ] Two-clone convergence test: create in A, sync, list in B; concurrent
-      edits in A and B converge after both sync
-- [ ] `br init --join <doc-url>` (adopt an existing tracker)
-- [ ] Verify create-offline-then-announce flow (D13)
+- [x] Per-invocation dial → sync → exit, with timeout + offline fallback
+      (`braid/src/sync.rs`: ws/wss/tcp schemes, `BRAID_SYNC_TIMEOUT`
+      default 5s; reads wait `we_have_their_changes`, writes wait
+      `they_have_our_changes`; offline → stderr warning + cache fallback;
+      explicit `braid sync` command treats offline as failure)
+- [x] Integration tests against an in-process samod server — went one
+      better than channel transport: a real samod Repo behind a TCP
+      loopback listener, exercised by real binary invocations
+      (7 tests, `braid/tests/sync.rs`)
+- [x] Two-clone convergence test: separate HOME/cache per clone, both see
+      both clones' issues through the server
+- [x] `br init --join <doc-id>` (landed in Phase 1; fetch-on-first-use
+      covered by the fresh-clone sync test)
+- [x] Verify create-offline-then-announce flow (D13): init+create against
+      a dead server, then sync to a live one; fresh clone fetches all
+- [x] `BRAID_NO_CACHE=1` stateless mode (deferred from Phase 1) with a
+      test proving statelessness both online and offline.
+      Note: Phase 1 CLI tests pin a dead `tcp://127.0.0.1:1` server —
+      pointing tests at the default public relay would leak test data.
 
 ### Phase 3 — domain features
 

@@ -9,18 +9,29 @@ use std::path::Path;
 
 use predicates::prelude::*;
 
+/// A sync server URL that is never reachable (TCP port 1 on loopback).
+/// These tests exercise the *offline* paths exclusively; pointing at the
+/// real default server would make them network-dependent and would leak
+/// test data to a public relay. tests/sync.rs covers the online paths.
+const DEAD_SERVER: &str = "tcp://127.0.0.1:1";
+
 fn braid(cwd: &Path, home: &Path) -> assert_cmd::Command {
     let mut c = assert_cmd::Command::cargo_bin("braid").unwrap();
     c.current_dir(cwd)
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
-        .env("HOME", home);
+        .env("HOME", home)
+        // fail fast: every command in this file is intentionally offline
+        .env("BRAID_SYNC_TIMEOUT", "0.3");
     c
 }
 
 /// init in `dir`, returning the doc id parsed from `.braid.toml`.
 fn init_tracker(dir: &Path, home: &Path) -> String {
-    braid(dir, home).args(["init", "--name", "test-project"]).assert().success();
+    braid(dir, home)
+        .args(["init", "--name", "test-project", "--sync-server", DEAD_SERVER])
+        .assert()
+        .success();
     let secret = std::fs::read_to_string(dir.join(".braid.toml")).unwrap();
     let parsed: toml::Value = toml::from_str(&secret).unwrap();
     parsed["doc_id"].as_str().unwrap().to_string()
@@ -44,7 +55,7 @@ fn init_writes_secret_file_and_warns_about_gitignore() {
     std::fs::create_dir_all(&work).unwrap();
 
     braid(&work, &home)
-        .args(["init", "--name", "test-project"])
+        .args(["init", "--name", "test-project", "--sync-server", DEAD_SERVER])
         .assert()
         .success()
         .stdout(predicate::str::contains("gitignore"));
@@ -53,7 +64,7 @@ fn init_writes_secret_file_and_warns_about_gitignore() {
     let secret = std::fs::read_to_string(&secret_path).unwrap();
     let parsed: toml::Value = toml::from_str(&secret).unwrap();
     assert!(!parsed["doc_id"].as_str().unwrap().is_empty());
-    assert_eq!(parsed["sync_server"].as_str().unwrap(), "wss://sync.automerge.org");
+    assert_eq!(parsed["sync_server"].as_str().unwrap(), DEAD_SERVER);
 
     #[cfg(unix)]
     {
@@ -88,7 +99,7 @@ fn init_print_only_writes_nothing() {
     std::fs::create_dir_all(&work).unwrap();
 
     braid(&work, &home)
-        .args(["init", "--print-only"])
+        .args(["init", "--print-only", "--sync-server", DEAD_SERVER])
         .assert()
         .success()
         .stdout(predicate::str::contains("doc_id = "));
@@ -244,7 +255,7 @@ fn unknown_doc_id_not_in_cache_mentions_sync() {
     std::fs::create_dir_all(&fresh_home).unwrap();
     std::fs::write(
         work.join(".braid.toml"),
-        format!("doc_id = \"{foreign_doc_id}\"\n"),
+        format!("doc_id = \"{foreign_doc_id}\"\nsync_server = \"{DEAD_SERVER}\"\n"),
     )
     .unwrap();
 
@@ -262,7 +273,11 @@ fn invalid_doc_id_format_is_a_clear_error() {
     let work = tmp.path().join("work");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
-    std::fs::write(work.join(".braid.toml"), "doc_id = \"not a doc id!\"\n").unwrap();
+    std::fs::write(
+        work.join(".braid.toml"),
+        format!("doc_id = \"not a doc id!\"\nsync_server = \"{DEAD_SERVER}\"\n"),
+    )
+    .unwrap();
 
     braid(&work, &home)
         .args(["list"])
@@ -311,7 +326,7 @@ fn init_join_adopts_existing_doc_id() {
     let doc_id = init_tracker(&other, &home);
 
     braid(&work, &home)
-        .args(["init", "--join", &doc_id])
+        .args(["init", "--join", &doc_id, "--sync-server", DEAD_SERVER])
         .assert()
         .success();
 
