@@ -131,6 +131,14 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Search issues (case-insensitive substring over all text)
+    Search {
+        text: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the agent-facing usage guide (markdown)
+    AgentsInfo,
     /// Sync with the configured server (fails if unreachable)
     Sync,
 }
@@ -244,6 +252,11 @@ async fn main() {
         },
         Cmd::Ready { json } => commands::ready(&cwd, json).await,
         Cmd::Blocked { json } => commands::blocked(&cwd, json).await,
+        Cmd::Search { text, json } => commands::search(&cwd, &text, json).await,
+        Cmd::AgentsInfo => {
+            commands::agents_info();
+            Ok(())
+        }
         Cmd::Sync => commands::sync(&cwd).await,
     };
 

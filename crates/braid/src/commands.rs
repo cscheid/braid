@@ -649,6 +649,59 @@ pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// search
+// ---------------------------------------------------------------------------
+
+fn issue_matches(issue: &Issue, needle_lower: &str) -> bool {
+    let mut haystacks: Vec<&str> = vec![&issue.id, &issue.title];
+    for s in [
+        &issue.description,
+        &issue.design,
+        &issue.acceptance_criteria,
+        &issue.notes,
+        &issue.assignee,
+        &issue.external_ref,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        haystacks.push(s);
+    }
+    haystacks.extend(issue.labels.iter().map(String::as_str));
+    haystacks.extend(issue.comments.values().map(|c| c.text.as_str()));
+    haystacks.iter().any(|h| h.to_lowercase().contains(needle_lower))
+}
+
+pub async fn search(cwd: &Path, needle: &str, json: bool) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    opened.close().await;
+
+    let needle_lower = needle.to_lowercase();
+    let mut found: Vec<&Issue> =
+        tracker.issues.values().filter(|i| issue_matches(i, &needle_lower)).collect();
+    found.sort_by(|a, b| braid_core::domain::listing_order(a, b));
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&found)?);
+    } else {
+        print_listing(&found);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// agents-info
+// ---------------------------------------------------------------------------
+
+/// The agent-facing usage guide, embedded so it is always version-matched
+/// (design decision D11).
+pub fn agents_info() {
+    print!("{}", include_str!("agents-info.md"));
+}
+
+// ---------------------------------------------------------------------------
 // sync
 // ---------------------------------------------------------------------------
 

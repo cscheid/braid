@@ -358,10 +358,20 @@ Cargo workspace:
 
 ### Phase 3 — domain features
 
-- [ ] `update`, `close`, `reopen`, labels, comments
-- [ ] `dep add/remove/list`, `ready`, `blocked` (+ cycle detection)
-- [ ] `search` (substring/regex over hydrated issues)
-- [ ] `agents-info` (D11) + the pointer-skill it describes
+- [x] `update`, `close`, `reopen`, labels, comments (empty string clears
+      optionals; close protects against open children unless `--force`;
+      multiple ids per close/reopen; 9 e2e tests)
+- [x] `dep add/remove/list`, `ready`, `blocked` (+ cycle detection):
+      braid-core `domain` module (17 unit tests) + CLI (9 e2e tests).
+      Semantics refinement: parent-child is hierarchical, not blocking —
+      see the Blocking semantics note in the schema section. Cycles are
+      warned about at `dep add` but allowed (merges can create them
+      anyway); `dep cycles` reports them.
+- [x] `search` (case-insensitive substring over id/title/prose/labels/
+      comments; `--json`)
+- [x] `agents-info` (D11): version-matched markdown guide embedded in the
+      binary (`src/agents-info.md`), including the pointer-skill snippet
+      ("tying the knot")
 
 ### Phase 4 — migration + escape hatches
 
