@@ -375,8 +375,26 @@ Cargo workspace:
 
 ### Phase 4 — migration + escape hatches
 
-- [ ] `br import` from beads `issues.jsonl` (field mapping; integer comment
-      ids → fresh ids; keep `bd-` prefix option)
-- [ ] `br export` (JSONL to stdout by default — doubles as grep surface)
-- [ ] Docs: README, security note on doc-ID-as-secret + public server
+- [x] `braid import` from beads `issues.jsonl` (tolerant parser accepts
+      beads arrays *and* braid maps; integer comment ids → fresh `c-` ids;
+      `"completed"` → closed alias; beads-only fields dropped; upsert by
+      id; parse-before-mutate atomicity; per-issue transactions — one big
+      transaction was severely superlinear in automerge reads).
+      Validated against the real 1121-issue example JSONL: 0.96s release
+      import, all listings work, and `dep cycles` found two real cycles
+      in the data. Dev profile now pins `opt-level=3` for automerge
+      (10-100x difference).
+- [x] `braid export` (JSONL to stdout, id-sorted; byte-exact
+      export→import→export round trip is tested)
+- [x] Docs: README with quick start, config layers, sync model, prominent
+      doc-id-as-secret + public-relay security note, beads migration,
+      agents-info pointer
 - [ ] Deferred hardening (tracked, not scheduled): HKDF-encrypted cache
+
+### Post-v1 observations
+
+- One transient e2e failure ("not in the local cache" right after init)
+  was seen exactly once, during a cargo relink mid-test-run after a
+  Cargo.toml profile change; 3 subsequent full-suite runs were clean.
+  If it recurs without build churn, investigate samod create/persist
+  visibility between processes.

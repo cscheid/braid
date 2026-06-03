@@ -139,6 +139,10 @@ enum Cmd {
     },
     /// Print the agent-facing usage guide (markdown)
     AgentsInfo,
+    /// Import issues from a JSONL file (beads or braid format); upserts by id
+    Import { path: std::path::PathBuf },
+    /// Export all issues as JSONL to stdout
+    Export,
     /// Sync with the configured server (fails if unreachable)
     Sync,
 }
@@ -257,6 +261,8 @@ async fn main() {
             commands::agents_info();
             Ok(())
         }
+        Cmd::Import { path } => commands::import(&cwd, &path).await,
+        Cmd::Export => commands::export(&cwd).await,
         Cmd::Sync => commands::sync(&cwd).await,
     };
 

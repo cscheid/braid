@@ -649,6 +649,50 @@ pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// import / export
+// ---------------------------------------------------------------------------
+
+pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read {}", path.display()))?;
+    // Parse everything before touching the document: imports are atomic.
+    let issues = crate::import::parse_jsonl(&text)?;
+
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    // One transaction per issue: reads inside an automerge transaction
+    // slow down as pending operations accumulate, so a single
+    // 1000-issue transaction is severely superlinear. Per-issue
+    // transactions keep reads against committed (indexed) state.
+    // Input atomicity is preserved — parse_jsonl validated everything
+    // before we got here — and a mid-import interruption is harmless
+    // because import is an upsert: re-running completes it.
+    opened.doc.with_document(|d| {
+        for issue in &issues {
+            d.transact(|tx| reconcile_issue(tx, issue)).map_err(|f| f.error)?;
+        }
+        Ok::<_, braid_core::amdoc::ReconcileError>(())
+    })?;
+    opened.push_and_close().await;
+
+    println!("imported {} issues from {}", issues.len(), path.display());
+    Ok(())
+}
+
+pub async fn export(cwd: &Path) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    opened.close().await;
+
+    // BTreeMap iteration is id-sorted already.
+    for issue in tracker.issues.values() {
+        println!("{}", serde_json::to_string(issue)?);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // search
 // ---------------------------------------------------------------------------
 

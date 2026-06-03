@@ -8,6 +8,11 @@ edition = "2024"
 license = "MIT"
 repository = "https://github.com/cscheid/tracker"
 
+# automerge is 10-100x slower unoptimized (per-character text ops); keep it
+# optimized even in dev builds so tests and debug binaries stay usable.
+[profile.dev.package.automerge]
+opt-level = 3
+
 [workspace.dependencies]
 automerge = "0.9.0"
 samod = "0.10.0"
