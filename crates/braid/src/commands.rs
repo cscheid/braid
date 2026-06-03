@@ -586,16 +586,40 @@ pub async fn dep_cycles(cwd: &Path) -> Result<()> {
 // ready / blocked
 // ---------------------------------------------------------------------------
 
+/// Width-aligned human listing. Column widths are computed from the data
+/// (slugged ids are much longer than bare ones). On a TTY a bold header
+/// and a strand-count footer are added; piped output stays data-rows-only
+/// so `braid list | wc -l` and grep/awk keep working.
 fn print_listing(issues: &[&Issue]) {
+    use std::io::IsTerminal;
+
+    if issues.is_empty() {
+        return;
+    }
+    let id_w = issues.iter().map(|i| i.id.len()).max().unwrap_or(2).max(2);
+    let ty_w = issues.iter().map(|i| i.issue_type.as_str().len()).max().unwrap_or(4).max(4);
+    let st_w = issues.iter().map(|i| i.status.as_str().len()).max().unwrap_or(6).max(6);
+
+    let tty = std::io::stdout().is_terminal();
+    if tty {
+        println!(
+            "\x1b[1m{:<id_w$}  {:<4} {:<ty_w$}  {:<st_w$}  TITLE\x1b[0m",
+            "ID", "PRI", "TYPE", "STATUS"
+        );
+    }
     for i in issues {
         println!(
-            "{}  P{} {:8} {:12} {}",
+            "{:<id_w$}  P{:<3} {:<ty_w$}  {:<st_w$}  {}",
             i.id,
             i.priority,
             i.issue_type.as_str(),
             i.status.as_str(),
             i.title
         );
+    }
+    if tty {
+        let n = issues.len();
+        println!("\n{n} strand{}", if n == 1 { "" } else { "s" });
     }
 }
 
@@ -632,11 +656,15 @@ pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
-    } else {
+    } else if !blocked.is_empty() {
+        let id_w = blocked.iter().map(|(i, _)| i.id.len()).max().unwrap_or(2);
+        let st_w =
+            blocked.iter().map(|(i, _)| i.status.as_str().len()).max().unwrap_or(6).max(6);
+        let title_w = blocked.iter().map(|(i, _)| i.title.len()).max().unwrap_or(0);
         for (issue, blockers) in blocked {
             let ids: Vec<&str> = blockers.iter().map(|b| b.id.as_str()).collect();
             println!(
-                "{}  P{} {:12} {}  [blocked by {}]",
+                "{:<id_w$}  P{:<3} {:<st_w$}  {:<title_w$}  [blocked by {}]",
                 issue.id,
                 issue.priority,
                 issue.status.as_str(),
@@ -784,26 +812,12 @@ pub async fn list(cwd: &Path, status: Option<String>, json: bool) -> Result<()> 
             None => true,
         })
         .collect();
-    issues.sort_by(|a, b| {
-        a.priority
-            .cmp(&b.priority)
-            .then_with(|| a.created_at.cmp(&b.created_at))
-            .then_with(|| a.id.cmp(&b.id))
-    });
+    issues.sort_by(|a, b| braid_core::domain::listing_order(a, b));
 
     if json {
         println!("{}", serde_json::to_string_pretty(&issues)?);
     } else {
-        for i in issues {
-            println!(
-                "{}  P{} {:8} {:12} {}",
-                i.id,
-                i.priority,
-                i.issue_type.as_str(),
-                i.status.as_str(),
-                i.title
-            );
-        }
+        print_listing(&issues);
     }
     Ok(())
 }

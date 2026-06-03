@@ -28,7 +28,7 @@ fn env(k: &str) -> Option<String> {
 }
 
 /// Open the braid cache as samod storage.
-pub fn open_cache() -> Result<cache::HashedKeyStorage<samod::storage::TokioFilesystemStorage>> {
+pub fn open_cache() -> Result<cache::HashedKeyStorage<cache::FsStorage>> {
     let dir = cache::cache_dir(&env)
         .context("cannot determine a cache directory (HOME is not set)")?;
     cache::open_cache_storage(&dir)

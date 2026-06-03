@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use braid::cache::{HashedKeyStorage, cache_dir, hash_component, open_cache_storage};
-use samod::storage::{Storage, StorageKey, TokioFilesystemStorage};
+use braid::cache::{FsStorage, HashedKeyStorage, cache_dir, hash_component, open_cache_storage};
+use samod::storage::{Storage, StorageKey};
 
 const DOC_ID: &str = "4NMNnkMhL8jXrdJbSeuJtZtnDoiu";
 
@@ -12,8 +12,8 @@ fn key(parts: &[&str]) -> StorageKey {
     StorageKey::from_parts(parts.to_vec()).unwrap()
 }
 
-fn adapter(root: &Path) -> HashedKeyStorage<TokioFilesystemStorage> {
-    HashedKeyStorage::new(TokioFilesystemStorage::new(root))
+fn adapter(root: &Path) -> HashedKeyStorage<FsStorage> {
+    HashedKeyStorage::new(FsStorage::new(root))
 }
 
 /// Recursively collect every path under `root`.
