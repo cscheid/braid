@@ -6,9 +6,13 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 use automerge::Automerge;
 use braid_core::amdoc::{hydrate, init_tracker, reconcile_issue};
-use braid_core::id::new_issue_id;
+use braid_core::domain::{
+    blocked_issues, dependency_cycles, dependents_of, open_children, ready_issues,
+};
+use braid_core::id::{new_comment_id, new_issue_id};
 use braid_core::schema::{
-    Issue, IssueType, SCHEMA_VERSION, Status, TrackerDoc, TrackerMetadata,
+    Comment, Dependency, DependencyType, Issue, IssueType, SCHEMA_VERSION, Status, TrackerDoc,
+    TrackerMetadata,
 };
 use braid_core::time::now_rfc3339;
 use samod::DocumentId;
@@ -268,6 +272,380 @@ fn format_issue(issue: &Issue) -> String {
         let _ = writeln!(out, "\n--- comment {} by {} at {}\n{}", c.id, c.author, c.created_at, c.text);
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// mutation commands: update, close, reopen, comment
+// ---------------------------------------------------------------------------
+
+/// Empty strings clear optional fields (`--description "" ` removes the
+/// description); `None` leaves the field untouched.
+fn apply_opt(field: &mut Option<String>, flag: Option<String>) {
+    if let Some(v) = flag {
+        *field = if v.is_empty() { None } else { Some(v) };
+    }
+}
+
+#[derive(Default)]
+pub struct UpdateOpts {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub design: Option<String>,
+    pub acceptance_criteria: Option<String>,
+    pub notes: Option<String>,
+    pub status: Option<String>,
+    pub priority: Option<i64>,
+    pub issue_type: Option<String>,
+    pub assignee: Option<String>,
+    pub external_ref: Option<String>,
+    pub add_labels: Vec<String>,
+    pub remove_labels: Vec<String>,
+    pub json: bool,
+}
+
+pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let mut issue = resolve_issue(&tracker, query)?.clone();
+
+    if let Some(t) = opts.title {
+        issue.title = t;
+    }
+    apply_opt(&mut issue.description, opts.description);
+    apply_opt(&mut issue.design, opts.design);
+    apply_opt(&mut issue.acceptance_criteria, opts.acceptance_criteria);
+    apply_opt(&mut issue.notes, opts.notes);
+    apply_opt(&mut issue.assignee, opts.assignee);
+    apply_opt(&mut issue.external_ref, opts.external_ref);
+    if let Some(s) = opts.status {
+        issue.status = Status::from(s.as_str());
+    }
+    if let Some(p) = opts.priority {
+        issue.priority = p;
+    }
+    if let Some(t) = opts.issue_type {
+        issue.issue_type = IssueType::from(t.as_str());
+    }
+    for l in opts.add_labels {
+        issue.labels.insert(l);
+    }
+    for l in &opts.remove_labels {
+        issue.labels.remove(l);
+    }
+    issue.updated_at = now_rfc3339();
+
+    opened
+        .doc
+        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
+    opened.push_and_close().await;
+
+    if opts.json {
+        println!("{}", serde_json::to_string_pretty(&issue)?);
+    } else {
+        println!("{}", issue.id);
+    }
+    Ok(())
+}
+
+pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force: bool) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+
+    // Resolve and validate everything before mutating anything.
+    let mut to_close: Vec<Issue> = Vec::new();
+    let closing_now: Vec<String> = queries
+        .iter()
+        .map(|q| resolve_issue(&tracker, q).map(|i| i.id.clone()))
+        .collect::<Result<_>>()?;
+    for query in queries {
+        let issue = resolve_issue(&tracker, query)?;
+        let open_kids: Vec<&Issue> = open_children(&tracker, &issue.id)
+            .into_iter()
+            // children being closed in the same invocation don't count
+            .filter(|c| !closing_now.contains(&c.id))
+            .collect();
+        if !open_kids.is_empty() && !force {
+            let ids: Vec<&str> = open_kids.iter().map(|i| i.id.as_str()).collect();
+            bail!(
+                "{} has open children ({}); close them first or pass --force",
+                issue.id,
+                ids.join(", ")
+            );
+        }
+        to_close.push(issue.clone());
+    }
+
+    let now = now_rfc3339();
+    for issue in &mut to_close {
+        issue.status = Status::Closed;
+        issue.closed_at = Some(now.clone());
+        issue.close_reason = reason.clone();
+        issue.updated_at = now.clone();
+    }
+
+    opened.doc.with_document(|d| {
+        d.transact(|tx| {
+            for issue in &to_close {
+                reconcile_issue(tx, issue)?;
+            }
+            Ok::<_, braid_core::amdoc::ReconcileError>(())
+        })
+        .map_err(|f| f.error)
+    })?;
+    opened.push_and_close().await;
+
+    for issue in &to_close {
+        println!("{}", issue.id);
+    }
+    Ok(())
+}
+
+pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+
+    let mut to_reopen: Vec<Issue> = queries
+        .iter()
+        .map(|q| resolve_issue(&tracker, q).cloned())
+        .collect::<Result<_>>()?;
+    let now = now_rfc3339();
+    for issue in &mut to_reopen {
+        issue.status = Status::Open;
+        issue.closed_at = None;
+        issue.close_reason = None;
+        issue.updated_at = now.clone();
+    }
+
+    opened.doc.with_document(|d| {
+        d.transact(|tx| {
+            for issue in &to_reopen {
+                reconcile_issue(tx, issue)?;
+            }
+            Ok::<_, braid_core::amdoc::ReconcileError>(())
+        })
+        .map_err(|f| f.error)
+    })?;
+    opened.push_and_close().await;
+
+    for issue in &to_reopen {
+        println!("{}", issue.id);
+    }
+    Ok(())
+}
+
+pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    let mut issue = resolve_issue(&tracker, query)?.clone();
+
+    let now = now_rfc3339();
+    let mut comment = Comment {
+        id: new_comment_id(),
+        author: opened.cfg.author.clone(),
+        created_at: now.clone(),
+        text: text.to_string(),
+    };
+    while issue.comments.contains_key(&comment.id) {
+        comment.id = new_comment_id();
+    }
+    let comment_id = comment.id.clone();
+    issue.comments.insert(comment.id.clone(), comment);
+    issue.updated_at = now;
+
+    opened
+        .doc
+        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
+    opened.push_and_close().await;
+
+    println!("{comment_id}");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// dependencies: dep add / remove / list / cycles
+// ---------------------------------------------------------------------------
+
+pub async fn dep_add(cwd: &Path, from: &str, to: &str, dep_type: &str) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let mut tracker = opened.doc.with_document(|d| hydrate(d))?;
+
+    let mut issue = resolve_issue(&tracker, from)?.clone();
+    let target_id = resolve_issue(&tracker, to)?.id.clone();
+    if issue.id == target_id {
+        bail!("{} cannot depend on itself", issue.id);
+    }
+
+    let dep = Dependency {
+        depends_on_id: target_id,
+        dep_type: DependencyType::from(dep_type),
+        created_at: now_rfc3339(),
+        created_by: opened.cfg.author.clone(),
+    };
+    let key = dep.key();
+    issue.dependencies.insert(key.clone(), dep);
+    issue.updated_at = now_rfc3339();
+
+    // Cycle check against the would-be state: allowed (concurrent merges
+    // can create cycles regardless), but loudly warned about.
+    tracker.issues.insert(issue.id.clone(), issue.clone());
+    let cycles = dependency_cycles(&tracker);
+    if !cycles.is_empty() {
+        for cycle in &cycles {
+            eprintln!("braid: warning: dependency cycle: {}", cycle.join(" -> "));
+        }
+    }
+
+    opened
+        .doc
+        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
+    opened.push_and_close().await;
+    println!("{}: {key}", issue.id);
+    Ok(())
+}
+
+pub async fn dep_remove(cwd: &Path, from: &str, to: &str, dep_type: Option<String>) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+
+    let mut issue = resolve_issue(&tracker, from)?.clone();
+    let target_id = resolve_issue(&tracker, to)?.id.clone();
+
+    let before = issue.dependencies.len();
+    issue.dependencies.retain(|_, d| {
+        let type_matches =
+            dep_type.as_ref().is_none_or(|t| d.dep_type.as_str() == t.as_str());
+        !(d.depends_on_id == target_id && type_matches)
+    });
+    if issue.dependencies.len() == before {
+        bail!("{} has no dependency on {target_id}", issue.id);
+    }
+    issue.updated_at = now_rfc3339();
+
+    opened
+        .doc
+        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
+    opened.push_and_close().await;
+    println!("{}", issue.id);
+    Ok(())
+}
+
+pub async fn dep_list(cwd: &Path, query: &str) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    opened.close().await;
+
+    let issue = resolve_issue(&tracker, query)?;
+    for dep in issue.dependencies.values() {
+        let status = tracker
+            .issues
+            .get(&dep.depends_on_id)
+            .map(|t| t.status.as_str())
+            .unwrap_or("missing!");
+        println!("outgoing  {} ({}) [{status}]", dep.depends_on_id, dep.dep_type);
+    }
+    for dependent in dependents_of(&tracker, &issue.id) {
+        for dep in dependent.dependencies.values() {
+            if dep.depends_on_id == issue.id {
+                println!(
+                    "incoming  {} ({}) [{}]",
+                    dependent.id,
+                    dep.dep_type,
+                    dependent.status.as_str()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn dep_cycles(cwd: &Path) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    opened.close().await;
+
+    let cycles = dependency_cycles(&tracker);
+    if cycles.is_empty() {
+        println!("no cycles");
+    } else {
+        for cycle in cycles {
+            println!("{}", cycle.join(" -> "));
+        }
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ready / blocked
+// ---------------------------------------------------------------------------
+
+fn print_listing(issues: &[&Issue]) {
+    for i in issues {
+        println!(
+            "{}  P{} {:8} {:12} {}",
+            i.id,
+            i.priority,
+            i.issue_type.as_str(),
+            i.status.as_str(),
+            i.title
+        );
+    }
+}
+
+pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    opened.close().await;
+
+    let ready = ready_issues(&tracker);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&ready)?);
+    } else {
+        print_listing(&ready);
+    }
+    Ok(())
+}
+
+pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
+    let opened = open_tracker(cwd).await?;
+    opened.pull().await;
+    let tracker = opened.doc.with_document(|d| hydrate(d))?;
+    opened.close().await;
+
+    let blocked = blocked_issues(&tracker);
+    if json {
+        let rows: Vec<serde_json::Value> = blocked
+            .iter()
+            .map(|(issue, blockers)| {
+                serde_json::json!({
+                    "issue": issue,
+                    "blocked_by": blockers.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+    } else {
+        for (issue, blockers) in blocked {
+            let ids: Vec<&str> = blockers.iter().map(|b| b.id.as_str()).collect();
+            println!(
+                "{}  P{} {:12} {}  [blocked by {}]",
+                issue.id,
+                issue.priority,
+                issue.status.as_str(),
+                issue.title,
+                ids.join(", ")
+            );
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

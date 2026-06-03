@@ -260,11 +260,19 @@ Schema notes:
   tombstoning internally). beads' tombstone/ephemeral/pinned/template states
   are dropped from v1.
 - **Dependency types** carried over from beads: `blocks`, `parent-child`,
-  `conditional-blocks`, `waits-for` (these four affect ready-work), plus
-  `related`, `discovered-from`, `replies-to`, `duplicates`, `supersedes`,
-  `caused-by`.
+  `conditional-blocks`, `waits-for`, `related`, `discovered-from`,
+  `replies-to`, `duplicates`, `supersedes`, `caused-by`.
+- **Blocking semantics** (refined during Phase 3, diverging deliberately
+  from a literal reading of beads): `blocks` / `conditional-blocks` /
+  `waits-for` block ready-work; **`parent-child` does not** — children are
+  how an epic progresses, so an open parent must not stop work on them.
+  Instead, open children gate the *parent's close* (close-protection).
+  beads reaches a similar end state via its `:child-open` blocked-cache
+  markers; braid makes it a first-class rule.
 - **Ready** = status ∈ {open, in_progress} and no blocking edge whose
-  blocker is non-closed. Computed in plain Rust over the hydrated doc.
+  target exists and is non-closed (dangling edges never block; blocking is
+  one-step, so dependency cycles merely block their members). Computed in
+  plain Rust over the hydrated doc.
 
 ## Crate layout
 
