@@ -17,6 +17,38 @@ while replacing the git-committed `issues.jsonl` + SQLite machinery with a
 synced document. (That JSONL file still matters: `braid import` migrates
 it.)
 
+## Installation
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cscheid/braid/main/install.sh | bash
+```
+
+Installs the latest release to `~/.local/bin` after verifying its
+SHA-256 against the published checksums. Prebuilt binaries cover Linux
+x86_64/ARM64 (statically linked — works on any distro, Alpine included)
+and macOS Intel/Apple Silicon. The installer never asks questions and
+never edits your shell config; if `~/.local/bin` isn't on your PATH it
+tells you the line to add.
+
+Useful flags (pass after `bash -s --`):
+
+```sh
+# specific version, custom directory
+curl -fsSL .../install.sh | bash -s -- --version v0.1.0 --dest ~/bin
+
+# build from source instead (needs a Rust toolchain)
+curl -fsSL .../install.sh | bash -s -- --from-source
+
+# remove an installed binary
+curl -fsSL .../install.sh | bash -s -- --uninstall
+```
+
+Alternatively, with a Rust toolchain:
+
+```sh
+cargo install --git https://github.com/cscheid/braid braid
+```
+
 ## Quick start
 
 ```sh

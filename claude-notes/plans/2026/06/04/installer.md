@@ -302,19 +302,28 @@ diverges from beads_rust).
 - [x] `--locked` release build verified locally; version-string parsing
       (`braid 0.1.0` → `0.1.0`) confirmed against the real binary
 - [x] `[profile.release] strip = true` — shipped binary 8.5M → 7.0M
-- [ ] Tag `v0.1.0`, confirm artifacts + checksums appear (needs push
-      approval)
+- [x] Tag `v0.1.0`, confirm artifacts + checksums appear — release
+      published with all 9 assets (4 platforms × archive+sha256, plus
+      combined checksums.sha256). Follow-up found in the run logs:
+      upload/download-artifact@v4 are Node 20 (forced to Node 24 on
+      2026-06-16); bumped to @v7/@v8.
 
 ### Phase 4: end-to-end validation + docs
 
-- [ ] Run the real one-liner on a clean machine/container for
-      linux_amd64 and darwin_arm64
-- [ ] Run network e2e tests against the real release
-- [ ] README: Installation section (one-liner, `--dest`/`--version`
-      flags, cargo-install alternative, uninstall)
-- [ ] File future-work strands: minisign signing, homebrew tap, Windows
-      support, `braid self-update`
-- [ ] Close the Phase 0 strand
+- [x] Run the real one-liner against the live v0.1.0 release
+      (darwin_arm64): resolution → download → published-checksum
+      verification → install → `braid 0.1.0`. (linux_amd64 covered by
+      the release job executing the static binary; no local container
+      runtime available for a distro-matrix check — revisit if Linux
+      install reports problems.)
+- [x] Run the `#[ignore]`d network e2e test against the real release —
+      passes
+- [x] README: Installation section (one-liner, flags, cargo-install
+      alternative, uninstall)
+- [x] File future-work strands: minisign signing (`br-dgvi0nme`),
+      homebrew tap (`br-2vr7pewh`), Windows support (`br-jrt1n7pl`),
+      `braid self-update` (`br-e8oyaptw`)
+- [x] Close the Phase 0.5 strand `br-f3b18xoa`
 
 ## Details
 
