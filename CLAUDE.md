@@ -13,6 +13,11 @@ This repo dogfoods braid: its own skein is configured via the gitignored
 `.braid.toml`. Run `braid agents-info` for usage; attribute your changes
 with `BRAID_AUTHOR=claude`.
 
+When you start working on a strand, mark it `in_progress` and assign it
+to yourself (`BRAID_AUTHOR=claude braid update <id> --status in_progress
+--assignee claude`); when the work lands, close it with a comment
+summarizing the outcome.
+
 ## Plans
 
 In this repository, we use Markdown documents as plans. The file format for the plans is `claude-notes/plans/yyyy/mm/dd/<plan>.md`.
