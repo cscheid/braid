@@ -411,9 +411,11 @@ fn missing_checksum_refuses_to_install() {
     // No --checksum and no .sha256 sidecar: fail closed.
     let out = sb.run(&["--artifact-url", &url, "--dest", &dest_arg(&sb)]);
     assert_failure(&out);
+    // The escape hatch must be shown in its curl|bash position — "re-run
+    // with <flag>" alone leaves piped users guessing where it goes.
     assert!(
-        stderr(&out).contains("--insecure-skip-checksum"),
-        "refusal should name the escape hatch\nstderr: {}",
+        stderr(&out).contains("bash -s -- --insecure-skip-checksum"),
+        "refusal should show the escape hatch in a full re-run line\nstderr: {}",
         stderr(&out)
     );
     assert!(!sb.installed_binary().exists());
@@ -531,9 +533,10 @@ fn missing_minisig_refuses_to_install() {
         &dest_arg(&sb),
     ]);
     assert_failure(&out);
+    // Full re-run line, not just the flag name (see checksum twin above).
     assert!(
-        stderr(&out).contains("--insecure-skip-signature"),
-        "refusal should name the escape hatch\nstderr: {}",
+        stderr(&out).contains("bash -s -- --insecure-skip-signature"),
+        "refusal should show the escape hatch in a full re-run line\nstderr: {}",
         stderr(&out)
     );
     assert!(!sb.installed_binary().exists());
@@ -676,8 +679,8 @@ fn missing_minisign_tool_refuses_with_install_guidance() {
     assert!(err.contains("minisign"), "should name the missing tool\nstderr: {err}");
     assert!(err.contains("install"), "should give install guidance\nstderr: {err}");
     assert!(
-        err.contains("--insecure-skip-signature"),
-        "should name the escape hatch\nstderr: {err}"
+        err.contains("bash -s -- --insecure-skip-signature"),
+        "should show the escape hatch in a full re-run line\nstderr: {err}"
     );
     assert!(!sb.installed_binary().exists());
 }

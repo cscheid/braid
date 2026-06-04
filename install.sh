@@ -78,6 +78,14 @@ log_warn()    { printf '%s\n' "${YELLOW}braid installer:${NC} $*" >&2; }
 log_error()   { printf '%s\n' "${RED}braid installer:${NC} $*" >&2; }
 die()         { log_error "$@"; exit 1; }
 
+# A full copy-pasteable re-run line. Refusals that say "re-run with
+# <flag>" must show where the flag goes: under curl|bash that is after
+# `bash -s --`, which nothing else on screen makes guessable.
+rerun_line() {
+    printf 'curl -fsSL https://raw.githubusercontent.com/%s/%s/main/install.sh | bash -s -- %s' \
+        "$OWNER" "$REPO" "$*"
+}
+
 usage() {
     cat <<EOF
 braid installer — install the braid binary from GitHub releases
@@ -246,7 +254,8 @@ verify_checksum() {
         fi
         die "no checksum available for $name; refusing to install an unverified binary.
   Pass --checksum SHA256, provide ${name}.sha256 next to the artifact,
-  or (not recommended) re-run with --insecure-skip-checksum."
+  or (not recommended) skip verification — flags go after \`bash -s --\`:
+    $(rerun_line --insecure-skip-checksum)"
     fi
 
     case "$expected" in
@@ -292,12 +301,14 @@ verify_signature() {
     sudo apt install minisign     (Debian/Ubuntu)
     sudo dnf install minisign     (Fedora)
     apk add minisign              (Alpine)
-  then re-run this script — or (not recommended) re-run with
-  --insecure-skip-signature."
+  then re-run this script — or (not recommended) skip signature
+  verification; flags go after \`bash -s --\`:
+    $(rerun_line --insecure-skip-signature)"
 
     [ -f "$sig" ] || die "no signature (.minisig) available for $name; refusing to install.
   Provide ${name}.minisig next to the artifact, or (not recommended)
-  re-run with --insecure-skip-signature."
+  skip signature verification — flags go after \`bash -s --\`:
+    $(rerun_line --insecure-skip-signature)"
 
     local verify_out
     if ! verify_out=$("$MINISIGN_BIN" -Vm "$file" -x "$sig" -P "$MINISIGN_PUBKEY" 2>&1); then

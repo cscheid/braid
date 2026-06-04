@@ -56,6 +56,10 @@ curl -fsSL .../install.sh | bash -s -- --version v0.2.1 --dest ~/bin
 # build from source instead (needs a Rust toolchain)
 curl -fsSL .../install.sh | bash -s -- --from-source
 
+# install without signature verification (not recommended; note the
+# flag goes after `bash -s --`, not on bash itself)
+curl -fsSL .../install.sh | bash -s -- --insecure-skip-signature
+
 # remove an installed binary
 curl -fsSL .../install.sh | bash -s -- --uninstall
 ```
