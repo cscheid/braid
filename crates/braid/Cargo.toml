@@ -40,6 +40,7 @@ sha2 = "0.10"
 toml = "0.8"
 
 [dev-dependencies]
+chrono = { workspace = true }
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"

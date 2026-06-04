@@ -14,7 +14,7 @@ use braid_core::schema::{
     Comment, Dependency, DependencyType, Issue, IssueType, SCHEMA_VERSION, Status, Skein,
     SkeinMetadata,
 };
-use braid_core::time::now_rfc3339;
+use braid_core::time::{now_rfc3339, parse_until};
 use samod::DocumentId;
 
 use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME, SecretSource};
@@ -499,6 +499,9 @@ fn format_issue(issue: &Issue) -> String {
         let reason = issue.close_reason.as_deref().unwrap_or("");
         let _ = writeln!(out, "closed:    {t} {reason}");
     }
+    if let Some(t) = &issue.defer_until {
+        let _ = writeln!(out, "wakes:     {t}");
+    }
     if let Some(r) = &issue.external_ref {
         let _ = writeln!(out, "ref:       {r}");
     }
@@ -563,6 +566,10 @@ pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
     apply_opt(&mut issue.external_ref, opts.external_ref);
     if let Some(s) = opts.status {
         issue.status = Status::from(s.as_str());
+        // leaving `deferred` by any path clears the wake time
+        if issue.status != Status::Deferred {
+            issue.defer_until = None;
+        }
     }
     if let Some(p) = opts.priority {
         issue.priority = p;
@@ -624,6 +631,7 @@ pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force
         issue.status = Status::Closed;
         issue.closed_at = Some(now.clone());
         issue.close_reason = reason.clone();
+        issue.defer_until = None;
         issue.updated_at = now.clone();
     }
 
@@ -657,6 +665,7 @@ pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
         issue.status = Status::Open;
         issue.closed_at = None;
         issue.close_reason = None;
+        issue.defer_until = None;
         issue.updated_at = now.clone();
     }
 
@@ -672,6 +681,98 @@ pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
     opened.push_and_close().await;
 
     for issue in &to_reopen {
+        println!("{}", issue.id);
+    }
+    Ok(())
+}
+
+/// Defer strands: status → `deferred`, with an optional wake time. The
+/// wake is read-time (see `domain::is_awake`): once `defer_until` passes,
+/// `ready` surfaces the strand again without anything rewriting it.
+/// Re-deferring updates the wake time; omitting `--until` clears it
+/// (sleeps until an explicit undefer).
+pub async fn defer(cwd: &Path, queries: &[String], until: Option<String>) -> Result<()> {
+    let opened = open_skein(cwd).await?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
+
+    let now = now_rfc3339();
+    let wake = match until.as_deref() {
+        Some(input) => Some(parse_until(input, &now).ok_or_else(|| {
+            anyhow!(
+                "cannot parse --until {input:?}: accepted forms are an RFC 3339 \
+                 timestamp (2026-07-01T09:00:00Z), a date (2026-07-01), or a \
+                 duration from now (36h, 7d, 2w)"
+            )
+        })?),
+        None => None,
+    };
+
+    // Resolve and validate everything before mutating anything.
+    let mut to_defer: Vec<Issue> = Vec::new();
+    for query in queries {
+        let issue = resolve_issue(&skein, query)?;
+        if issue.status == Status::Closed {
+            bail!("{} is closed; reopen it before deferring", issue.id);
+        }
+        to_defer.push(issue.clone());
+    }
+
+    for issue in &mut to_defer {
+        issue.status = Status::Deferred;
+        issue.defer_until = wake.clone();
+        issue.updated_at = now.clone();
+    }
+
+    opened.doc.with_document(|d| {
+        d.transact(|tx| {
+            for issue in &to_defer {
+                reconcile_issue(tx, issue)?;
+            }
+            Ok::<_, braid_core::amdoc::ReconcileError>(())
+        })
+        .map_err(|f| f.error)
+    })?;
+    opened.push_and_close().await;
+
+    for issue in &to_defer {
+        println!("{}", issue.id);
+    }
+    Ok(())
+}
+
+/// Wake deferred strands explicitly: status → `open`, wake time cleared.
+pub async fn undefer(cwd: &Path, queries: &[String]) -> Result<()> {
+    let opened = open_skein(cwd).await?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
+
+    let mut to_wake: Vec<Issue> = Vec::new();
+    for query in queries {
+        let issue = resolve_issue(&skein, query)?;
+        if issue.status != Status::Deferred {
+            bail!("{} is not deferred (status: {})", issue.id, issue.status);
+        }
+        to_wake.push(issue.clone());
+    }
+
+    let now = now_rfc3339();
+    for issue in &mut to_wake {
+        issue.status = Status::Open;
+        issue.defer_until = None;
+        issue.updated_at = now.clone();
+    }
+
+    opened.doc.with_document(|d| {
+        d.transact(|tx| {
+            for issue in &to_wake {
+                reconcile_issue(tx, issue)?;
+            }
+            Ok::<_, braid_core::amdoc::ReconcileError>(())
+        })
+        .map_err(|f| f.error)
+    })?;
+    opened.push_and_close().await;
+
+    for issue in &to_wake {
         println!("{}", issue.id);
     }
     Ok(())
@@ -908,13 +1009,18 @@ fn print_listing(issues: &[&Issue]) {
         );
     }
     for i in issues {
+        let wake = match &i.defer_until {
+            Some(t) => format!("  [wakes {t}]"),
+            None => String::new(),
+        };
         println!(
-            "{:<id_w$}  P{:<3} {:<ty_w$}  {:<st_w$}  {}",
+            "{:<id_w$}  P{:<3} {:<ty_w$}  {:<st_w$}  {}{}",
             i.id,
             i.priority,
             i.issue_type.as_str(),
             i.status.as_str(),
-            i.title
+            i.title,
+            wake
         );
     }
     if tty {

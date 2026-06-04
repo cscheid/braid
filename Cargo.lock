@@ -228,6 +228,7 @@ dependencies = [
  "assert_cmd",
  "automerge",
  "braid-core",
+ "chrono",
  "clap",
  "futures",
  "jsonschema",

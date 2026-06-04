@@ -114,6 +114,21 @@ enum Cmd {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Defer strands; once --until passes they count as ready again
+    Defer {
+        #[arg(required = true)]
+        ids: Vec<String>,
+        /// Wake time: RFC 3339 (2026-07-01T09:00:00Z), date (2026-07-01),
+        /// or duration from now (36h, 7d, 2w). Omitted: sleeps until
+        /// `braid undefer`.
+        #[arg(long)]
+        until: Option<String>,
+    },
+    /// Wake deferred strands now (status back to open)
+    Undefer {
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
     /// Delete strands entirely (a delete wins over concurrent edits)
     Delete {
         #[arg(required = true)]
@@ -266,6 +281,8 @@ async fn main() {
         }
         Cmd::Close { ids, reason, force } => commands::close(&cwd, &ids, reason, force).await,
         Cmd::Reopen { ids } => commands::reopen(&cwd, &ids).await,
+        Cmd::Defer { ids, until } => commands::defer(&cwd, &ids, until).await,
+        Cmd::Undefer { ids } => commands::undefer(&cwd, &ids).await,
         Cmd::Delete { ids, force } => commands::delete(&cwd, &ids, force).await,
         Cmd::Comment { id, text } => commands::comment(&cwd, &id, &text).await,
         Cmd::Dep { cmd } => match cmd {

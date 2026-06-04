@@ -109,16 +109,20 @@ exports that carry it. Additive change, noted in the schema `$comment`.
 
 ### Phase 2 — CLI commands (tests first)
 
-- [ ] CLI tests (`tests/issue_ops.rs` or new `defer_cli.rs`): `defer`
-      with/without `--until`; all three `--until` forms; multiple ids;
-      `defer` on closed errors; `undefer` restores open + clears date;
-      `undefer` on non-deferred errors; `close`/`reopen`/`update
-      --status` clear `defer_until`; `update --status deferred` still
-      works; `--json` output; `ready` surfaces an expired-deferred strand
-- [ ] Implement: `parse_until` helper (chrono); `Cmd::Defer`/`Cmd::Undefer`
-      in `main.rs`; `commands::defer`/`commands::undefer` modeled on
-      `close`/`reopen`; clearing logic in `update`/`close`/`reopen`;
-      display strings in `list`/`show`
+- [x] CLI tests (new `defer_cli.rs`, 17 tests): `defer` with/without
+      `--until`; all three `--until` forms (+ garbage rejected, strand
+      untouched); multiple ids; id fragments; `defer` on closed errors;
+      re-defer updates/clears the date; `undefer` restores open + clears
+      date; `undefer` on non-deferred errors; `close`/`update --status`
+      clear `defer_until`; `update --status deferred` still works and
+      keeps an existing date; `ready` wakes expired and sleeps future;
+      `show`/`list` render the wake time
+- [x] Implement: `parse_until` in `braid-core::time` (unit-tested:
+      RFC 3339 normalized to UTC, bare date, `Nh`/`Nd`/`Nw` durations);
+      `Cmd::Defer`/`Cmd::Undefer` in `main.rs`; `commands::defer`/
+      `commands::undefer` modeled on `close`/`reopen` (resolve+validate
+      all before mutating); clearing logic in `update`/`close`/`reopen`;
+      `wakes:` line in `show`, `[wakes <t>]` suffix in listings
 
 ### Phase 3 — contract, import/export (tests first)
 
