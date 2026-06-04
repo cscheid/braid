@@ -88,14 +88,30 @@ Included (names as the host sees them):
 | `braid_dep_add`, `braid_dep_remove`, `braid_dep_list`, `braid_dep_cycles` | dependencies |
 | `braid_export` | read-only JSONL escape hatch |
 
-**Deliberately excluded** — the isolation boundary:
+**The destructive-tool boundary** (Q3, resolved 2026-06-04 after an
+ecosystem survey — GitHub MCP's toolsets/`--read-only`, the MCP tool-
+annotations spec, official tracker servers): three layers, mirroring
+what the popular servers converged on.
+
+1. **Annotations on every tool** (2025-03-26 spec): `readOnlyHint` on
+   queries; `close` is `destructiveHint: false` (reversible via
+   `reopen`); mutations annotated honestly. Hosts build confirmation UX
+   on these — but they are hints, not security.
+2. **`braid mcp --read-only`**: force-disables all non-read-only tools
+   (GitHub-style; e2e-tested, since GitHub shipped a transport where
+   the flag silently failed — enforcement is real security surface).
+3. **`delete` and `import`: excluded from the default toolset**, enabled
+   only by an explicit launch flag (`--enable-destructive`). braid's
+   delete has *no undo* (delete-wins CRDT, no tombstone) — strictly
+   sharper than GitHub's `delete_file` (git history) or Linear's trash —
+   so the *operator* opts in at launch; the agent never decides at
+   runtime.
+
+**Never tools, under any flag** — the isolation boundary proper:
 
 - `secret` (defeats the entire point)
-- `init`, `rotate`, `rotate --adopt` (human/operator decisions; an agent
-  must never be able to rotate a skein or adopt a pointer)
-- `delete` (sharpest mutation, delete-wins semantics; `close` covers
-  agent workflows) — *open question Q3 below*
-- `import` (bulk overwrite; operator action) — *also Q3*
+- `init`, `rotate`, `rotate --adopt` (operator decisions; an agent must
+  never be able to rotate a skein or adopt a pointer)
 
 Tool **outputs are strand records conforming to the published JSON
 Schema** (docs/schemas/strand.schema.json) — the contract does double
@@ -156,9 +172,9 @@ beyond what `.braid.toml` already holds.
   Plan assumes long-lived.
 - **Q2 — rmcp vs hand-rolled**: plan assumes rmcp, pinned. Veto if the
   dependency posture feels wrong.
-- **Q3 — destructive-tool boundary**: plan excludes `delete` and
-  `import` from the tool surface. Include them (with `force`-style
-  params), or keep the conservative boundary?
+- ~~**Q3 — destructive-tool boundary**~~: resolved (cscheid,
+  2026-06-04) — the three-layer pattern above: annotations + --read-only
+  + delete/import behind --enable-destructive, default off.
 - **Q4 — multi-skein**: one server = one skein (plan), or a
   `--project`-per-tool-call multiplexer? Multiplexing complicates the
   session model and the isolation story; plan says one skein per server
@@ -166,8 +182,16 @@ beyond what `.braid.toml` already holds.
 - **Q5 — tool result shape**: full schema-conformant strand records
   (plan; reuses the contract, slightly verbose) vs trimmed summaries
   with a `braid_show` for detail?
-- **Q6 — does `braid_sync` exist as a tool**? With continuous sync it's
-  nearly redundant; plan omits it and reports `synced` per mutation.
+- ~~**Q6 — does `braid_sync` exist as a tool**~~: resolved 2026-06-04 —
+  no tool. Context: in the CLI, sync is a *moment* (short-lived process,
+  dial-exchange-exit), so an explicit fail-loudly verb earns its place.
+  The MCP session syncs continuously, so a sync tool degenerates into a
+  busy-poll attractor. The agent's real question — "did my change reach
+  the server?" — is answered by the `synced` flag on every mutation
+  result; connection state and unconfirmed-changes count live in the
+  read-only `braid://skein` resource (phase 3). If an explicit barrier
+  ever proves necessary, a `readOnlyHint` `braid_status` tool can be
+  added without design upheaval.
 
 ## Work items
 
@@ -178,6 +202,9 @@ beyond what `.braid.toml` already holds.
 ### Phase 1 — MCP server, tools
 - [ ] `braid mcp` subcommand (stdio, rmcp), tool registry per the table
 - [ ] typed input schemas; outputs are schema-conformant strand records
+- [ ] tool annotations on every tool (readOnlyHint/destructiveHint/
+      idempotentHint); `--enable-destructive` gate for delete/import,
+      default off (e2e: absent from tools/list without the flag)
 - [ ] rotation re-check per op; `synced` flag on mutation results
 - [ ] `--read-only`; `--project`; server-level identity
 - [ ] e2e stdio harness (spawn, initialize, tools/list, tools/call)
@@ -191,6 +218,8 @@ beyond what `.braid.toml` already holds.
 
 ### Phase 3 — resources & notifications
 - [ ] `braid://ready`, `braid://strand/{id}`, `braid://skein` resources
+      (skein resource carries connection state + unconfirmed-changes
+      count — the Q6 status surface; never the doc id)
 - [ ] changes() → resources/updated notifications; liveness e2e
 - [ ] revisit strand priority/close
 
