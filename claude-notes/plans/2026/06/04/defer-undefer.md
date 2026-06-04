@@ -126,13 +126,14 @@ exports that carry it. Additive change, noted in the schema `$comment`.
 
 ### Phase 3 — contract, import/export (tests first)
 
-- [ ] `docs/schemas/strand.schema.json`: optional `defer_until`
+- [x] `docs/schemas/strand.schema.json`: optional `defer_until`
       (`$defs/timestamp`), `$comment` notes the additive change
-- [ ] `tests/schema_contract.rs`: CLI-built skein gains a deferred strand
+- [x] `tests/schema_contract.rs`: CLI-built skein gains a deferred strand
       (dated + dateless); malformed-record case for a bad `defer_until`
-- [ ] `tests/import_export.rs`: import a JSONL line carrying
-      `defer_until` (beads + braid format), export round-trips it
-- [ ] Implement: `RawIssue.defer_until` in `import.rs`; export needs no
+- [x] `tests/import_export.rs`: import a JSONL line carrying
+      `defer_until` (beads + braid format, preserved as-is), export
+      round-trips it
+- [x] Implement: `RawIssue.defer_until` in `import.rs`; export needs no
       change beyond the schema field (serde-driven)
 
 ### Phase 4 — docs & wrap-up

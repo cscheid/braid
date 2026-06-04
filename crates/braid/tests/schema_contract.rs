@@ -111,9 +111,15 @@ fn cli_built_skein_exports_conforming_records() {
     let closed = t.create(&["Will close"]);
     t.braid().args(["close", &closed, "--reason", "done"]).assert().success();
 
+    // deferred strands: with a wake time, and dateless
+    let dated = t.create(&["Deferred with date"]);
+    t.braid().args(["defer", &dated, "--until", "2099-07-01"]).assert().success();
+    let dateless = t.create(&["Deferred without date"]);
+    t.braid().args(["defer", &dateless]).assert().success();
+
     let export = t.export();
     let lines: Vec<&str> = export.lines().collect();
-    assert_eq!(lines.len(), 5);
+    assert_eq!(lines.len(), 7);
     for line in lines {
         assert_conforms(&validator, line);
     }
@@ -188,6 +194,7 @@ fn schema_rejects_malformed_records() {
         })),
         ("colon in id", mutate(&|v| v["id"] = "br:bad".into())),
         ("non-integer priority", mutate(&|v| v["priority"] = "high".into())),
+        ("non-string defer_until", mutate(&|v| v["defer_until"] = 42.into())),
         ("unknown top-level field", mutate(&|v| v["surprise"] = true.into())),
         ("empty labels array", mutate(&|v| v["labels"] = serde_json::json!([]))),
         ("duplicate labels", mutate(&|v| v["labels"] = serde_json::json!(["a", "a"]))),

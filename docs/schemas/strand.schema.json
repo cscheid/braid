@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/cscheid/braid/main/docs/schemas/strand.schema.json",
   "title": "braid strand record",
   "description": "One strand (issue) as emitted by `braid export`: one JSON object per JSONL line. This is the strict writer contract — `braid import` accepts a superset (see docs/schemas/README.md). The schema is version-matched to the braid release that ships it.",
-  "$comment": "braid 0.1.0; document schema_version 1",
+  "$comment": "braid 0.1.0; document schema_version 1. Additive change vs the initial 0.1.0 schema: optional `defer_until` (no document schema_version bump — old binaries ignore and preserve the field).",
   "type": "object",
   "properties": {
     "id": {
@@ -35,6 +35,10 @@
     "updated_at": { "$ref": "#/$defs/timestamp" },
     "closed_at": { "$ref": "#/$defs/timestamp" },
     "close_reason": { "type": "string" },
+    "defer_until": {
+      "$ref": "#/$defs/timestamp",
+      "description": "Wake time, meaningful only while `status` is `deferred`: once it passes, the strand counts as ready again (computed by readers at read time; nothing rewrites the document). Absent on a deferred strand = sleeps until an explicit undefer."
+    },
     "external_ref": { "type": "string" },
     "labels": {
       "type": "array",

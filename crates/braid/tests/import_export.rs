@@ -140,6 +140,35 @@ fn import_rejects_malformed_lines_atomically() {
 }
 
 #[test]
+fn import_preserves_defer_until() {
+    let tmp = tempfile::tempdir().unwrap();
+    let t = Skein::new_at(tmp.path(), "imp");
+    let jsonl = t.work.join("deferred.jsonl");
+    // a braid-format line and a beads-style line (beads-only fields in
+    // tow), both carrying defer_until
+    std::fs::write(
+        &jsonl,
+        concat!(
+            r#"{"id":"br-park1","title":"Braid deferred","status":"deferred","priority":2,"issue_type":"task","created_at":"2026-06-01T00:00:00.000000Z","created_by":"t","updated_at":"2026-06-01T00:00:00.000000Z","defer_until":"2026-09-01T00:00:00.000000Z"}"#,
+            "\n",
+            r#"{"id":"bd-park2","title":"Beads deferred","status":"deferred","priority":2,"issue_type":"task","created_at":"2026-06-01T00:00:00Z","created_by":"t","updated_at":"2026-06-01T00:00:00Z","defer_until":"2026-09-15T12:00:00Z","source_repo":".","compaction_level":0}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    t.braid().args(["import", jsonl.to_str().unwrap()]).assert().success();
+    assert_eq!(t.show_json("br-park1")["defer_until"], "2026-09-01T00:00:00.000000Z");
+    // imported timestamps are preserved as-is, not normalized
+    assert_eq!(t.show_json("bd-park2")["defer_until"], "2026-09-15T12:00:00Z");
+
+    // and export carries the field back out
+    let out = t.braid().arg("export").assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains(r#""defer_until":"2026-09-01T00:00:00.000000Z""#));
+}
+
+#[test]
 fn export_emits_jsonl_sorted_by_id() {
     let tmp = tempfile::tempdir().unwrap();
     let t = Skein::new_at(tmp.path(), "exp");
