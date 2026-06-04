@@ -23,6 +23,19 @@ pub struct OpenedSkein {
     pub offline_reason: Option<String>,
 }
 
+/// Outcome of a bounded push to the sync server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PushOutcome {
+    /// The server confirmed it has our changes.
+    Confirmed,
+    /// Connected, but no confirmation within the timeout — changes are
+    /// saved locally and will converge on a later sync.
+    Unconfirmed,
+    /// No server connection; changes are saved locally.
+    Offline,
+}
+
 fn env(k: &str) -> Option<String> {
     std::env::var(k).ok()
 }
@@ -63,6 +76,14 @@ pub async fn open_repo() -> Result<Repo> {
 pub async fn open_skein(cwd: &Path) -> Result<OpenedSkein> {
     let opened = open_skein_unchecked(cwd).await?;
     let meta = opened.doc.with_document(|d| braid_core::amdoc::hydrate_metadata(d))?;
+    check_rotation(&meta)?;
+    Ok(opened)
+}
+
+/// Refuse a rotated skein with mode-appropriate instructions. Used at open
+/// and re-checked per operation by long-lived sessions (`ops::Session`),
+/// which may receive a rotation over sync long after opening.
+pub fn check_rotation(meta: &braid_core::schema::SkeinMetadata) -> Result<()> {
     if let Some(rotated_at) = &meta.rotated_at {
         if meta.rotated_to.is_some() {
             bail!(
@@ -79,7 +100,7 @@ pub async fn open_skein(cwd: &Path) -> Result<OpenedSkein> {
             );
         }
     }
-    Ok(opened)
+    Ok(())
 }
 
 /// [`open_skein`] without the rotation refusal (and pulls all the same).
@@ -141,6 +162,22 @@ impl OpenedSkein {
         if let Some(conn) = self.conn {
             let _ = tokio::time::timeout(sync_timeout(), self.doc.we_have_their_changes(conn))
                 .await;
+        }
+    }
+
+    /// Wait (bounded) until the server confirms it has everything local.
+    /// Non-consuming: long-lived sessions push after every mutation and
+    /// keep going. The outcome tells the truth instead of blocking forever.
+    pub async fn push(&self) -> PushOutcome {
+        match self.conn {
+            None => PushOutcome::Offline,
+            Some(conn) => {
+                let confirmed =
+                    tokio::time::timeout(sync_timeout(), self.doc.they_have_our_changes(conn))
+                        .await
+                        .is_ok();
+                if confirmed { PushOutcome::Confirmed } else { PushOutcome::Unconfirmed }
+            }
         }
     }
 

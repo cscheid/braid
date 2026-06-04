@@ -1,25 +1,23 @@
-//! CLI command implementations (Phase 1: local-only).
+//! CLI command surface.
+//!
+//! Two kinds of functions live here: **operator commands** (init, secret,
+//! rotate, adopt) that manage the skein's lifecycle and secret directly,
+//! and **printers** that delegate all domain logic to [`crate::ops`] (the
+//! layer shared with the MCP server) and only format output.
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use automerge::Automerge;
-use braid_core::amdoc::{delete_issue, hydrate, init_skein, reconcile_issue};
-use braid_core::domain::{
-    blocked_issues, dependency_cycles, dependents_of, open_children, ready_issues,
-};
-use braid_core::id::{new_comment_id, new_issue_id};
-use braid_core::schema::{
-    Comment, Dependency, DependencyType, Issue, IssueType, SCHEMA_VERSION, Status, Skein,
-    SkeinMetadata,
-};
-use braid_core::time::{now_rfc3339, parse_until};
+use braid_core::amdoc::{hydrate, init_skein, reconcile_issue};
+use braid_core::schema::{Issue, SCHEMA_VERSION, SkeinMetadata};
+use braid_core::time::now_rfc3339;
 use samod::DocumentId;
 
 use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME, SecretSource};
+use crate::ops::{self, Session};
+use crate::skein::{PushOutcome, open_repo, open_skein, open_skein_unchecked};
 use crate::sync::{Connect, connect, sync_timeout};
-use crate::skein::{open_repo, open_skein, open_skein_unchecked};
 
 // ---------------------------------------------------------------------------
 // init
@@ -384,6 +382,24 @@ pub async fn rotate_adopt(cwd: &Path) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// CLI printers over ops::Session
+//
+// Everything below is presentation: open a Session, call the operation,
+// print. Domain logic lives in crate::ops (shared with the MCP server).
+// ---------------------------------------------------------------------------
+
+/// CLI replica of the old push_and_close warning: connected but the
+/// server didn't confirm receipt within the timeout.
+fn warn_unconfirmed(sync: &PushOutcome) {
+    if matches!(sync, PushOutcome::Unconfirmed) {
+        eprintln!(
+            "braid: changes saved locally, but the server did not confirm \
+             receipt in time; run `braid sync` later to be sure"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // create
 // ---------------------------------------------------------------------------
 
@@ -399,49 +415,25 @@ pub struct CreateOpts {
 }
 
 pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-
-    let mut id = new_issue_id(&skein.metadata.id_prefix, opts.slug.as_deref());
-    // Collision with an existing id is astronomically improbable but free
-    // to guard against locally:
-    while skein.issues.contains_key(&id) {
-        id = new_issue_id(&skein.metadata.id_prefix, opts.slug.as_deref());
-    }
-
-    let now = now_rfc3339();
-    let issue = Issue {
-        id: id.clone(),
-        title: opts.title,
-        description: opts.description,
-        design: None,
-        acceptance_criteria: None,
-        notes: None,
-        status: Status::Open,
-        priority: opts.priority,
-        issue_type: IssueType::from(opts.issue_type.as_str()),
-        assignee: opts.assignee,
-        created_at: now.clone(),
-        created_by: opened.cfg.author.clone(),
-        updated_at: now,
-        closed_at: None,
-        close_reason: None,
-        defer_until: None,
-        external_ref: None,
-        labels: opts.labels.into_iter().collect::<BTreeSet<_>>(),
-        dependencies: BTreeMap::new(),
-        comments: BTreeMap::new(),
-    };
-
-    opened
-        .doc
-        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
-    opened.push_and_close().await;
+    let session = Session::open(cwd).await?;
+    let result = session
+        .create(ops::CreateOpts {
+            title: opts.title,
+            description: opts.description,
+            issue_type: opts.issue_type,
+            priority: opts.priority,
+            labels: opts.labels,
+            slug: opts.slug,
+            assignee: opts.assignee,
+        })
+        .await?;
+    session.shutdown().await;
+    warn_unconfirmed(&result.sync);
 
     if opts.json {
-        println!("{}", serde_json::to_string_pretty(&issue)?);
+        println!("{}", serde_json::to_string_pretty(&result.value)?);
     } else {
-        println!("{id}");
+        println!("{}", result.value.id);
     }
     Ok(())
 }
@@ -450,34 +442,16 @@ pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
 // show
 // ---------------------------------------------------------------------------
 
-/// Resolve a user-supplied id query: exact match first, then unique
-/// substring match.
-pub fn resolve_issue<'t>(skein: &'t Skein, query: &str) -> Result<&'t Issue> {
-    if let Some(issue) = skein.issues.get(query) {
-        return Ok(issue);
-    }
-    let matches: Vec<&Issue> =
-        skein.issues.values().filter(|i| i.id.contains(query)).collect();
-    match matches.len() {
-        0 => bail!("no issue matching {query:?}"),
-        1 => Ok(matches[0]),
-        _ => {
-            let ids: Vec<&str> = matches.iter().map(|i| i.id.as_str()).collect();
-            bail!("ambiguous id {query:?}: matches {}", ids.join(", "));
-        }
-    }
-}
-
 pub async fn show(cwd: &Path, query: &str, json: bool) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
+    let session = Session::open(cwd).await?;
+    let issue = session.show(query);
+    session.shutdown().await;
+    let issue = issue?;
 
-    let issue = resolve_issue(&skein, query)?;
     if json {
-        println!("{}", serde_json::to_string_pretty(issue)?);
+        println!("{}", serde_json::to_string_pretty(&issue)?);
     } else {
-        print!("{}", format_issue(issue));
+        print!("{}", format_issue(&issue));
     }
     Ok(())
 }
@@ -525,14 +499,6 @@ fn format_issue(issue: &Issue) -> String {
 // mutation commands: update, close, reopen, comment
 // ---------------------------------------------------------------------------
 
-/// Empty strings clear optional fields (`--description "" ` removes the
-/// description); `None` leaves the field untouched.
-fn apply_opt(field: &mut Option<String>, flag: Option<String>) {
-    if let Some(v) = flag {
-        *field = if v.is_empty() { None } else { Some(v) };
-    }
-}
-
 #[derive(Default)]
 pub struct UpdateOpts {
     pub title: Option<String>,
@@ -551,258 +517,99 @@ pub struct UpdateOpts {
 }
 
 pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    let mut issue = resolve_issue(&skein, query)?.clone();
+    let json = opts.json;
+    let session = Session::open(cwd).await?;
+    let result = session
+        .update(
+            query,
+            ops::UpdateOpts {
+                title: opts.title,
+                description: opts.description,
+                design: opts.design,
+                acceptance_criteria: opts.acceptance_criteria,
+                notes: opts.notes,
+                status: opts.status,
+                priority: opts.priority,
+                issue_type: opts.issue_type,
+                assignee: opts.assignee,
+                external_ref: opts.external_ref,
+                add_labels: opts.add_labels,
+                remove_labels: opts.remove_labels,
+            },
+        )
+        .await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    if let Some(t) = opts.title {
-        issue.title = t;
-    }
-    apply_opt(&mut issue.description, opts.description);
-    apply_opt(&mut issue.design, opts.design);
-    apply_opt(&mut issue.acceptance_criteria, opts.acceptance_criteria);
-    apply_opt(&mut issue.notes, opts.notes);
-    apply_opt(&mut issue.assignee, opts.assignee);
-    apply_opt(&mut issue.external_ref, opts.external_ref);
-    if let Some(s) = opts.status {
-        issue.status = Status::from(s.as_str());
-        // leaving `deferred` by any path clears the wake time
-        if issue.status != Status::Deferred {
-            issue.defer_until = None;
-        }
-    }
-    if let Some(p) = opts.priority {
-        issue.priority = p;
-    }
-    if let Some(t) = opts.issue_type {
-        issue.issue_type = IssueType::from(t.as_str());
-    }
-    for l in opts.add_labels {
-        issue.labels.insert(l);
-    }
-    for l in &opts.remove_labels {
-        issue.labels.remove(l);
-    }
-    issue.updated_at = now_rfc3339();
-
-    opened
-        .doc
-        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
-    opened.push_and_close().await;
-
-    if opts.json {
-        println!("{}", serde_json::to_string_pretty(&issue)?);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result.value)?);
     } else {
-        println!("{}", issue.id);
+        println!("{}", result.value.id);
     }
     Ok(())
 }
 
 pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force: bool) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let session = Session::open(cwd).await?;
+    let result = session.close_strands(queries, reason, force).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    // Resolve and validate everything before mutating anything.
-    let mut to_close: Vec<Issue> = Vec::new();
-    let closing_now: Vec<String> = queries
-        .iter()
-        .map(|q| resolve_issue(&skein, q).map(|i| i.id.clone()))
-        .collect::<Result<_>>()?;
-    for query in queries {
-        let issue = resolve_issue(&skein, query)?;
-        let open_kids: Vec<&Issue> = open_children(&skein, &issue.id)
-            .into_iter()
-            // children being closed in the same invocation don't count
-            .filter(|c| !closing_now.contains(&c.id))
-            .collect();
-        if !open_kids.is_empty() && !force {
-            let ids: Vec<&str> = open_kids.iter().map(|i| i.id.as_str()).collect();
-            bail!(
-                "{} has open children ({}); close them first or pass --force",
-                issue.id,
-                ids.join(", ")
-            );
-        }
-        to_close.push(issue.clone());
-    }
-
-    let now = now_rfc3339();
-    for issue in &mut to_close {
-        issue.status = Status::Closed;
-        issue.closed_at = Some(now.clone());
-        issue.close_reason = reason.clone();
-        issue.defer_until = None;
-        issue.updated_at = now.clone();
-    }
-
-    opened.doc.with_document(|d| {
-        d.transact(|tx| {
-            for issue in &to_close {
-                reconcile_issue(tx, issue)?;
-            }
-            Ok::<_, braid_core::amdoc::ReconcileError>(())
-        })
-        .map_err(|f| f.error)
-    })?;
-    opened.push_and_close().await;
-
-    for issue in &to_close {
+    for issue in &result.value.closed {
         println!("{}", issue.id);
     }
     Ok(())
 }
 
 pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let session = Session::open(cwd).await?;
+    let result = session.reopen(queries).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    let mut to_reopen: Vec<Issue> = queries
-        .iter()
-        .map(|q| resolve_issue(&skein, q).cloned())
-        .collect::<Result<_>>()?;
-    let now = now_rfc3339();
-    for issue in &mut to_reopen {
-        issue.status = Status::Open;
-        issue.closed_at = None;
-        issue.close_reason = None;
-        issue.defer_until = None;
-        issue.updated_at = now.clone();
-    }
-
-    opened.doc.with_document(|d| {
-        d.transact(|tx| {
-            for issue in &to_reopen {
-                reconcile_issue(tx, issue)?;
-            }
-            Ok::<_, braid_core::amdoc::ReconcileError>(())
-        })
-        .map_err(|f| f.error)
-    })?;
-    opened.push_and_close().await;
-
-    for issue in &to_reopen {
+    for issue in &result.value.reopened {
         println!("{}", issue.id);
     }
     Ok(())
 }
 
-/// Defer strands: status → `deferred`, with an optional wake time. The
-/// wake is read-time (see `domain::is_awake`): once `defer_until` passes,
-/// `ready` surfaces the strand again without anything rewriting it.
-/// Re-deferring updates the wake time; omitting `--until` clears it
-/// (sleeps until an explicit undefer).
 pub async fn defer(cwd: &Path, queries: &[String], until: Option<String>) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let session = Session::open(cwd).await?;
+    let result = session.defer(queries, until).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    let now = now_rfc3339();
-    let wake = match until.as_deref() {
-        Some(input) => Some(parse_until(input, &now).ok_or_else(|| {
-            anyhow!(
-                "cannot parse --until {input:?}: accepted forms are an RFC 3339 \
-                 timestamp (2026-07-01T09:00:00Z), a date (2026-07-01), or a \
-                 duration from now (36h, 7d, 2w)"
-            )
-        })?),
-        None => None,
-    };
-
-    // Resolve and validate everything before mutating anything.
-    let mut to_defer: Vec<Issue> = Vec::new();
-    for query in queries {
-        let issue = resolve_issue(&skein, query)?;
-        if issue.status == Status::Closed {
-            bail!("{} is closed; reopen it before deferring", issue.id);
-        }
-        to_defer.push(issue.clone());
-    }
-
-    for issue in &mut to_defer {
-        issue.status = Status::Deferred;
-        issue.defer_until = wake.clone();
-        issue.updated_at = now.clone();
-    }
-
-    opened.doc.with_document(|d| {
-        d.transact(|tx| {
-            for issue in &to_defer {
-                reconcile_issue(tx, issue)?;
-            }
-            Ok::<_, braid_core::amdoc::ReconcileError>(())
-        })
-        .map_err(|f| f.error)
-    })?;
-    opened.push_and_close().await;
-
-    for issue in &to_defer {
+    for issue in &result.value.deferred {
         println!("{}", issue.id);
     }
     Ok(())
 }
 
-/// Wake deferred strands explicitly: status → `open`, wake time cleared.
 pub async fn undefer(cwd: &Path, queries: &[String]) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let session = Session::open(cwd).await?;
+    let result = session.undefer(queries).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    let mut to_wake: Vec<Issue> = Vec::new();
-    for query in queries {
-        let issue = resolve_issue(&skein, query)?;
-        if issue.status != Status::Deferred {
-            bail!("{} is not deferred (status: {})", issue.id, issue.status);
-        }
-        to_wake.push(issue.clone());
-    }
-
-    let now = now_rfc3339();
-    for issue in &mut to_wake {
-        issue.status = Status::Open;
-        issue.defer_until = None;
-        issue.updated_at = now.clone();
-    }
-
-    opened.doc.with_document(|d| {
-        d.transact(|tx| {
-            for issue in &to_wake {
-                reconcile_issue(tx, issue)?;
-            }
-            Ok::<_, braid_core::amdoc::ReconcileError>(())
-        })
-        .map_err(|f| f.error)
-    })?;
-    opened.push_and_close().await;
-
-    for issue in &to_wake {
+    for issue in &result.value.undeferred {
         println!("{}", issue.id);
     }
     Ok(())
 }
 
 pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    let mut issue = resolve_issue(&skein, query)?.clone();
+    let session = Session::open(cwd).await?;
+    let result = session.comment(query, text).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    let now = now_rfc3339();
-    let mut comment = Comment {
-        id: new_comment_id(),
-        author: opened.cfg.author.clone(),
-        created_at: now.clone(),
-        text: text.to_string(),
-    };
-    while issue.comments.contains_key(&comment.id) {
-        comment.id = new_comment_id();
-    }
-    let comment_id = comment.id.clone();
-    issue.comments.insert(comment.id.clone(), comment);
-    issue.updated_at = now;
-
-    opened
-        .doc
-        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
-    opened.push_and_close().await;
-
-    println!("{comment_id}");
+    println!("{}", result.value.comment.id);
     Ok(())
 }
 
@@ -810,61 +617,23 @@ pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
 // delete
 // ---------------------------------------------------------------------------
 
-/// Remove strands from the skein entirely. Deletion is the sharpest
-/// mutation braid has — the pinned merge semantics say a delete wins over
-/// concurrent edits — so strands that other strands still reference are
-/// guarded behind `--force` (mirroring close's open-children protection).
-/// Forced deletion leaves dangling edges, which are contract-legal: they
-/// never block, and `dep list` shows them as `[missing!]`.
 pub async fn delete(cwd: &Path, queries: &[String], force: bool) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let session = Session::open(cwd).await?;
+    let result = session.delete(queries, force).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    // Resolve and validate everything before mutating anything (atomic
-    // on bad input, same discipline as close/import).
-    let doomed: Vec<String> = queries
-        .iter()
-        .map(|q| resolve_issue(&skein, q).map(|i| i.id.clone()))
-        .collect::<Result<_>>()?;
-
-    for id in &doomed {
-        let dependents: Vec<&Issue> = dependents_of(&skein, id)
-            .into_iter()
-            // strands deleted in the same invocation don't count
-            .filter(|d| !doomed.contains(&d.id))
-            .collect();
-        if !dependents.is_empty() && !force {
-            let ids: Vec<&str> = dependents.iter().map(|i| i.id.as_str()).collect();
-            bail!(
-                "{id} is referenced by {}; deleting it would leave dangling \
-                 edges. Remove the dependencies first (`braid dep remove`) or \
-                 pass --force.",
-                ids.join(", ")
-            );
-        }
-        if !dependents.is_empty() {
-            let ids: Vec<&str> = dependents.iter().map(|i| i.id.as_str()).collect();
-            eprintln!(
-                "braid: {id} deleted; {} now hold{} dangling edges to it \
-                 (harmless: they never block)",
-                ids.join(", "),
-                if dependents.len() == 1 { "s" } else { "" }
-            );
-        }
+    for note in &result.value.dangling {
+        eprintln!(
+            "braid: {} deleted; {} now hold{} dangling edges to it \
+             (harmless: they never block)",
+            note.deleted_id,
+            note.dependents.join(", "),
+            if note.dependents.len() == 1 { "s" } else { "" }
+        );
     }
-
-    opened.doc.with_document(|d| {
-        d.transact(|tx| {
-            for id in &doomed {
-                delete_issue(tx, id)?;
-            }
-            Ok::<_, braid_core::amdoc::ReconcileError>(())
-        })
-        .map_err(|f| f.error)
-    })?;
-    opened.push_and_close().await;
-
-    for id in &doomed {
+    for id in &result.value.deleted {
         println!("{id}");
     }
     Ok(())
@@ -875,104 +644,51 @@ pub async fn delete(cwd: &Path, queries: &[String], force: bool) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 pub async fn dep_add(cwd: &Path, from: &str, to: &str, dep_type: &str) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let mut skein = opened.doc.with_document(|d| hydrate(d))?;
+    let session = Session::open(cwd).await?;
+    let result = session.dep_add(from, to, dep_type).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    let mut issue = resolve_issue(&skein, from)?.clone();
-    let target_id = resolve_issue(&skein, to)?.id.clone();
-    if issue.id == target_id {
-        bail!("{} cannot depend on itself", issue.id);
+    for cycle in &result.value.cycles {
+        eprintln!("braid: warning: dependency cycle: {}", cycle.join(" -> "));
     }
-
-    let dep = Dependency {
-        depends_on_id: target_id,
-        dep_type: DependencyType::from(dep_type),
-        created_at: now_rfc3339(),
-        created_by: opened.cfg.author.clone(),
-    };
-    let key = dep.key();
-    issue.dependencies.insert(key.clone(), dep);
-    issue.updated_at = now_rfc3339();
-
-    // Cycle check against the would-be state: allowed (concurrent merges
-    // can create cycles regardless), but loudly warned about.
-    skein.issues.insert(issue.id.clone(), issue.clone());
-    let cycles = dependency_cycles(&skein);
-    if !cycles.is_empty() {
-        for cycle in &cycles {
-            eprintln!("braid: warning: dependency cycle: {}", cycle.join(" -> "));
-        }
-    }
-
-    opened
-        .doc
-        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
-    opened.push_and_close().await;
-    println!("{}: {key}", issue.id);
+    println!("{}: {}", result.value.issue.id, result.value.key);
     Ok(())
 }
 
 pub async fn dep_remove(cwd: &Path, from: &str, to: &str, dep_type: Option<String>) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
+    let session = Session::open(cwd).await?;
+    let result = session.dep_remove(from, to, dep_type.as_deref()).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    let mut issue = resolve_issue(&skein, from)?.clone();
-    let target_id = resolve_issue(&skein, to)?.id.clone();
-
-    let before = issue.dependencies.len();
-    issue.dependencies.retain(|_, d| {
-        let type_matches =
-            dep_type.as_ref().is_none_or(|t| d.dep_type.as_str() == t.as_str());
-        !(d.depends_on_id == target_id && type_matches)
-    });
-    if issue.dependencies.len() == before {
-        bail!("{} has no dependency on {target_id}", issue.id);
-    }
-    issue.updated_at = now_rfc3339();
-
-    opened
-        .doc
-        .with_document(|d| d.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error))?;
-    opened.push_and_close().await;
-    println!("{}", issue.id);
+    println!("{}", result.value.id);
     Ok(())
 }
 
 pub async fn dep_list(cwd: &Path, query: &str) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
+    let session = Session::open(cwd).await?;
+    let listing = session.dep_list(query);
+    session.shutdown().await;
+    let listing = listing?;
 
-    let issue = resolve_issue(&skein, query)?;
-    for dep in issue.dependencies.values() {
-        let status = skein
-            .issues
-            .get(&dep.depends_on_id)
-            .map(|t| t.status.as_str())
-            .unwrap_or("missing!");
-        println!("outgoing  {} ({}) [{status}]", dep.depends_on_id, dep.dep_type);
+    for n in &listing.outgoing {
+        println!("outgoing  {} ({}) [{}]", n.id, n.dep_type, n.status);
     }
-    for dependent in dependents_of(&skein, &issue.id) {
-        for dep in dependent.dependencies.values() {
-            if dep.depends_on_id == issue.id {
-                println!(
-                    "incoming  {} ({}) [{}]",
-                    dependent.id,
-                    dep.dep_type,
-                    dependent.status.as_str()
-                );
-            }
-        }
+    for n in &listing.incoming {
+        println!("incoming  {} ({}) [{}]", n.id, n.dep_type, n.status);
     }
     Ok(())
 }
 
 pub async fn dep_cycles(cwd: &Path) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
+    let session = Session::open(cwd).await?;
+    let cycles = session.dep_cycles();
+    session.shutdown().await;
+    let cycles = cycles?;
 
-    let cycles = dependency_cycles(&skein);
     if cycles.is_empty() {
         println!("no cycles");
     } else {
@@ -991,7 +707,7 @@ pub async fn dep_cycles(cwd: &Path) -> Result<()> {
 /// (slugged ids are much longer than bare ones). On a TTY a bold header
 /// and a strand-count footer are added; piped output stays data-rows-only
 /// so `braid list | wc -l` and grep/awk keep working.
-fn print_listing(issues: &[&Issue]) {
+fn print_listing(issues: &[Issue]) {
     use std::io::IsTerminal;
 
     if issues.is_empty() {
@@ -1030,11 +746,11 @@ fn print_listing(issues: &[&Issue]) {
 }
 
 pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
+    let session = Session::open(cwd).await?;
+    let ready = session.ready();
+    session.shutdown().await;
+    let ready = ready?;
 
-    let ready = ready_issues(&skein, &now_rfc3339());
     if json {
         println!("{}", serde_json::to_string_pretty(&ready)?);
     } else {
@@ -1044,36 +760,26 @@ pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
 }
 
 pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
+    let session = Session::open(cwd).await?;
+    let blocked = session.blocked();
+    session.shutdown().await;
+    let blocked = blocked?;
 
-    let blocked = blocked_issues(&skein, &now_rfc3339());
     if json {
-        let rows: Vec<serde_json::Value> = blocked
-            .iter()
-            .map(|(issue, blockers)| {
-                serde_json::json!({
-                    "issue": issue,
-                    "blocked_by": blockers.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(),
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string_pretty(&rows)?);
+        println!("{}", serde_json::to_string_pretty(&blocked)?);
     } else if !blocked.is_empty() {
-        let id_w = blocked.iter().map(|(i, _)| i.id.len()).max().unwrap_or(2);
+        let id_w = blocked.iter().map(|b| b.issue.id.len()).max().unwrap_or(2);
         let st_w =
-            blocked.iter().map(|(i, _)| i.status.as_str().len()).max().unwrap_or(6).max(6);
-        let title_w = blocked.iter().map(|(i, _)| i.title.len()).max().unwrap_or(0);
-        for (issue, blockers) in blocked {
-            let ids: Vec<&str> = blockers.iter().map(|b| b.id.as_str()).collect();
+            blocked.iter().map(|b| b.issue.status.as_str().len()).max().unwrap_or(6).max(6);
+        let title_w = blocked.iter().map(|b| b.issue.title.len()).max().unwrap_or(0);
+        for b in blocked {
             println!(
                 "{:<id_w$}  P{:<3} {:<st_w$}  {:<title_w$}  [blocked by {}]",
-                issue.id,
-                issue.priority,
-                issue.status.as_str(),
-                issue.title,
-                ids.join(", ")
+                b.issue.id,
+                b.issue.priority,
+                b.issue.status.as_str(),
+                b.issue.title,
+                b.blocked_by.join(", ")
             );
         }
     }
@@ -1090,35 +796,21 @@ pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
     // Parse everything before touching the document: imports are atomic.
     let issues = crate::import::parse_jsonl(&text)?;
 
-    let opened = open_skein(cwd).await?;
-    // One transaction per issue: reads inside an automerge transaction
-    // slow down as pending operations accumulate, so a single
-    // 1000-issue transaction is severely superlinear. Per-issue
-    // transactions keep reads against committed (indexed) state.
-    // Input atomicity is preserved — parse_jsonl validated everything
-    // before we got here — and a mid-import interruption is harmless
-    // because import is an upsert: re-running completes it.
-    opened.doc.with_document(|d| {
-        for issue in &issues {
-            d.transact(|tx| reconcile_issue(tx, issue)).map_err(|f| f.error)?;
-        }
-        Ok::<_, braid_core::amdoc::ReconcileError>(())
-    })?;
-    opened.push_and_close().await;
+    let session = Session::open(cwd).await?;
+    let result = session.import(&issues).await;
+    session.shutdown().await;
+    let result = result?;
+    warn_unconfirmed(&result.sync);
 
-    println!("imported {} strands from {}", issues.len(), path.display());
+    println!("imported {} strands from {}", result.value.imported, path.display());
     Ok(())
 }
 
 pub async fn export(cwd: &Path) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
-
-    // BTreeMap iteration is id-sorted already.
-    for issue in skein.issues.values() {
-        println!("{}", serde_json::to_string(issue)?);
-    }
+    let session = Session::open(cwd).await?;
+    let jsonl = session.export_jsonl();
+    session.shutdown().await;
+    print!("{}", jsonl?);
     Ok(())
 }
 
@@ -1126,35 +818,11 @@ pub async fn export(cwd: &Path) -> Result<()> {
 // search
 // ---------------------------------------------------------------------------
 
-fn issue_matches(issue: &Issue, needle_lower: &str) -> bool {
-    let mut haystacks: Vec<&str> = vec![&issue.id, &issue.title];
-    for s in [
-        &issue.description,
-        &issue.design,
-        &issue.acceptance_criteria,
-        &issue.notes,
-        &issue.assignee,
-        &issue.external_ref,
-    ]
-    .into_iter()
-    .flatten()
-    {
-        haystacks.push(s);
-    }
-    haystacks.extend(issue.labels.iter().map(String::as_str));
-    haystacks.extend(issue.comments.values().map(|c| c.text.as_str()));
-    haystacks.iter().any(|h| h.to_lowercase().contains(needle_lower))
-}
-
 pub async fn search(cwd: &Path, needle: &str, json: bool) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
-
-    let needle_lower = needle.to_lowercase();
-    let mut found: Vec<&Issue> =
-        skein.issues.values().filter(|i| issue_matches(i, &needle_lower)).collect();
-    found.sort_by(|a, b| braid_core::domain::listing_order(a, b));
+    let session = Session::open(cwd).await?;
+    let found = session.search(needle);
+    session.shutdown().await;
+    let found = found?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&found)?);
@@ -1181,16 +849,20 @@ pub fn agents_info() {
 /// Explicit bidirectional sync. Unlike other commands, being offline here
 /// is a hard failure: syncing is the entire point.
 pub async fn sync(cwd: &Path) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    if opened.conn.is_none() {
-        let reason = opened.offline_reason.clone().unwrap_or_default();
-        opened.close().await;
+    let session = Session::open(cwd).await?;
+    if !session.is_online() {
+        let reason = session.offline_reason().unwrap_or_default().to_string();
+        session.shutdown().await;
         bail!("offline: {reason}");
     }
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    let server = opened.cfg.sync_server.clone();
-    opened.push_and_close().await;
-    println!("synced with {server} ({} strands)", skein.issues.len());
+    let count = session.strand_count();
+    let server = session.sync_server().to_string();
+    // an explicit sync wants the push barrier even with no local changes
+    let outcome = session.push().await;
+    session.shutdown().await;
+    let count = count?;
+    warn_unconfirmed(&outcome);
+    println!("synced with {server} ({count} strands)");
     Ok(())
 }
 
@@ -1199,19 +871,10 @@ pub async fn sync(cwd: &Path) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 pub async fn list(cwd: &Path, status: Option<String>, json: bool) -> Result<()> {
-    let opened = open_skein(cwd).await?;
-    let skein = opened.doc.with_document(|d| hydrate(d))?;
-    opened.close().await;
-
-    let mut issues: Vec<&Issue> = skein
-        .issues
-        .values()
-        .filter(|i| match &status {
-            Some(s) => i.status.as_str() == s,
-            None => true,
-        })
-        .collect();
-    issues.sort_by(|a, b| braid_core::domain::listing_order(a, b));
+    let session = Session::open(cwd).await?;
+    let issues = session.list(status.as_deref());
+    session.shutdown().await;
+    let issues = issues?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&issues)?);

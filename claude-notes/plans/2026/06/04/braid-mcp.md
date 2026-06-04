@@ -196,8 +196,12 @@ beyond what `.braid.toml` already holds.
 ## Work items
 
 ### Phase 0 — ops extraction (no behavior change)
-- [ ] `ops::Session` + typed results; commands.rs becomes printers
-- [ ] full suite green; no CLI output changes (e2e tests are the proof)
+- [x] `ops::Session` + typed results; commands.rs becomes printers
+      (ops.rs ~550 lines: Session with per-op rotation guard, Mutated<T>
+      carrying PushOutcome, typed results for blocked/dep/delete/comment;
+      OpenedSkein::push() non-consuming; check_rotation factored)
+- [x] full suite green; no CLI output changes (155 tests, zero diffs —
+      the e2e suite pins exact output text)
 
 ### Phase 1 — MCP server, tools
 - [ ] `braid mcp` subcommand (stdio, rmcp), tool registry per the table
