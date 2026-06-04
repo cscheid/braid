@@ -33,3 +33,25 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Gate for the static-musl release targets (see
+  # claude-notes/plans/2026/06/04/installer.md): musl breakage tends to
+  # hide in transitive deps (native-tls→openssl was ours; libc::statx was
+  # beads_rust's), so build AND run the full suite against musl. The
+  # binaries are fully static, so they run natively on the glibc runner.
+  # aarch64-musl is exercised by the release workflow on an arm runner.
+  musl:
+    name: test (x86_64 musl static)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      # Build-first for the same assert_cmd relink-race reason as above.
+      - run: cargo build --workspace --all-targets --target x86_64-unknown-linux-musl
+      - run: cargo test --workspace --target x86_64-unknown-linux-musl
