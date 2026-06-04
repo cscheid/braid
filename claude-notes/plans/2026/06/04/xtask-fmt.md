@@ -49,23 +49,25 @@ and `--no-verify`-skippable); the optional pre-push hook is convenience.
 
 ### Phase 1 — rustfmt.toml + mechanical reformat
 
-- [ ] Add `rustfmt.toml` (`use_small_heuristics = "Max"`), commit
-- [ ] `cargo fmt` mechanical commit: verify the diff contains no
-      semantic change (tests + clippy green before commit), nothing else
-      in the commit
+- [x] Add `rustfmt.toml` (`use_small_heuristics = "Max"`), commit
+- [x] `cargo fmt` mechanical commit: verified no semantic change
+      (per-file character accounting: only trailing commas + one
+      closure-brace collapse; tests + clippy green), nothing else in
+      the commit (27 files, +191/−406)
 
 ### Phase 2 — xtask crate (tests first)
 
-- [ ] e2e tests (`crates/xtask/tests/cli.rs`, assert_cmd):
-      `ci --dry-run` prints the exact 4-command sequence; unknown /
-      missing subcommand exits nonzero with usage on stderr;
-      `install-hooks` in a scratch git repo creates an executable
-      pre-push containing the marker and `cargo xtask ci`; re-run is
-      idempotent; a pre-existing foreign pre-push is refused (file
-      untouched); works from a subdirectory of the repo
-- [ ] Implement `crates/xtask` (std-only), add to workspace members
-- [ ] `.cargo/config.toml`: `[alias] xtask = "run -q -p xtask --"`
-- [ ] Run `cargo xtask ci` for real once — full pipeline green
+- [x] e2e tests (`crates/xtask/tests/cli.rs`, 9 tests, red first):
+      `ci --dry-run` prints the exact 4-command sequence; `ci` rejects
+      unknown flags; unknown / missing subcommand exits nonzero with
+      usage on stderr; `install-hooks` in a scratch git repo creates an
+      executable pre-push containing the marker and `cargo xtask ci`;
+      re-run is idempotent; a pre-existing foreign pre-push is refused
+      (file untouched); works from a subdirectory; outside a git repo
+      fails helpfully
+- [x] Implement `crates/xtask` (std-only), add to workspace members
+- [x] `.cargo/config.toml`: `[alias] xtask = "run -p xtask --"`
+- [x] Run `cargo xtask ci` for real once — full pipeline green
 
 ### Phase 3 — CI gate
 

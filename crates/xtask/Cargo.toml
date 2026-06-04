@@ -1,0 +1,21 @@
+[package]
+name = "xtask"
+description = "repo automation (cargo xtask pattern): ci pipeline, fmt, git hooks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+# Deliberately std-only: xtask builds in every `cargo build --workspace`
+# (including the CI musl job), so it must stay free of runtime deps.
+[dependencies]
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"

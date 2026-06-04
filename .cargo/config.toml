@@ -1,0 +1,4 @@
+# `cargo xtask <cmd>` — repo automation (ci pipeline, fmt, git hooks).
+# See crates/xtask.
+[alias]
+xtask = "run -p xtask --"
