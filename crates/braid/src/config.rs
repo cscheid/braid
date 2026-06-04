@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::docid::DocId;
+
 pub const DEFAULT_SYNC_SERVER: &str = "wss://sync.automerge.org";
 pub const REPO_FILE_NAME: &str = ".braid.toml";
 pub const PROJECT_MARKER_NAME: &str = ".braid-project";
@@ -69,7 +71,7 @@ pub enum SecretSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedConfig {
-    pub doc_id: String,
+    pub doc_id: DocId,
     pub sync_server: String,
     pub author: String,
     pub doc_id_source: SecretSource,
@@ -156,7 +158,7 @@ pub fn resolve(inputs: &ConfigInputs) -> Result<ResolvedConfig, ConfigError> {
         .or_else(|| inputs.os_user.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
-    Ok(ResolvedConfig { doc_id, sync_server, author, doc_id_source })
+    Ok(ResolvedConfig { doc_id: DocId::new(doc_id), sync_server, author, doc_id_source })
 }
 
 fn non_blank(v: Option<String>) -> Option<String> {

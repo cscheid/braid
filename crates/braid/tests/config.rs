@@ -45,7 +45,7 @@ fn env_wins_over_everything() {
         os_user: Some("os-author".into()),
     };
     let got = resolve(&inputs).unwrap();
-    assert_eq!(got.doc_id, "env-doc");
+    assert_eq!(got.doc_id.expose_secret(), "env-doc");
     assert_eq!(got.sync_server, "wss://env.example");
     assert_eq!(got.author, "env-author");
     assert_eq!(got.doc_id_source, SecretSource::Env);
@@ -68,7 +68,7 @@ fn repo_file_wins_over_user_config() {
         ..Default::default()
     };
     let got = resolve(&inputs).unwrap();
-    assert_eq!(got.doc_id, "file-doc");
+    assert_eq!(got.doc_id.expose_secret(), "file-doc");
     assert_eq!(got.doc_id_source, SecretSource::RepoFile("/repo/.braid.toml".into()));
     // per-field independence: sync_server and author keep falling through
     assert_eq!(got.sync_server, "wss://user.example");
@@ -85,7 +85,7 @@ fn user_config_via_marker() {
         ..Default::default()
     };
     let got = resolve(&inputs).unwrap();
-    assert_eq!(got.doc_id, "user-doc");
+    assert_eq!(got.doc_id.expose_secret(), "user-doc");
     assert_eq!(got.doc_id_source, SecretSource::UserConfig { project: "proj".into() });
     assert_eq!(got.sync_server, DEFAULT_SYNC_SERVER, "default server fallback");
     assert_eq!(got.author, "git-author", "author falls through to git");
@@ -155,7 +155,7 @@ fn repo_file_without_doc_id_still_contributes_other_fields() {
         ..Default::default()
     };
     let got = resolve(&inputs).unwrap();
-    assert_eq!(got.doc_id, "env-doc");
+    assert_eq!(got.doc_id.expose_secret(), "env-doc");
     assert_eq!(got.sync_server, "wss://file.example");
 }
 

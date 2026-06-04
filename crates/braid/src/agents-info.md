@@ -27,7 +27,10 @@ If one of these is in place, every command just works. Otherwise:
 
 **The doc id is a secret.** It is a bearer token granting read *and* write
 access to the skein. Never commit `.braid.toml`; keep it gitignored.
-Never print the doc id into logs, PRs, or strand text.
+Never print the doc id into logs, PRs, or strand text. braid itself only
+shows a redacted prefix; the full id is printed exclusively by
+`braid secret` — run that only when a human explicitly asks for it (e.g.
+to configure another machine).
 
 ## The agent workflow
 
@@ -67,6 +70,7 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid dep list <id>` | dependencies in both directions |
 | `braid dep cycles` | report dependency cycles |
 | `braid sync` | force a sync; fails when the server is unreachable |
+| `braid secret` | print the full doc id + sync server (paste-ready TOML). **Grants read/write access** — only run when a human asks |
 | `braid import <file>` | import strands from JSONL (beads or braid format) |
 | `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |

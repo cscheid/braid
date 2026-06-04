@@ -139,6 +139,8 @@ enum Cmd {
     },
     /// Print the agent-facing usage guide (markdown)
     AgentsInfo,
+    /// Print the skein secret (doc id + sync server) — grants read/write access; share deliberately
+    Secret,
     /// Import strands from a JSONL file (beads or braid format); upserts by id
     Import { path: std::path::PathBuf },
     /// Export all strands as JSONL to stdout
@@ -261,6 +263,7 @@ async fn main() {
             commands::agents_info();
             Ok(())
         }
+        Cmd::Secret => commands::secret(&cwd),
         Cmd::Import { path } => commands::import(&cwd, &path).await,
         Cmd::Export => commands::export(&cwd).await,
         Cmd::Sync => commands::sync(&cwd).await,

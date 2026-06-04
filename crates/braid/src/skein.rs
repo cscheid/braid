@@ -61,10 +61,10 @@ pub async fn open_repo() -> Result<Repo> {
 /// that, from the server.
 pub async fn open_skein(cwd: &Path) -> Result<OpenedSkein> {
     let cfg = config::load(cwd)?;
-    let doc_id: DocumentId = cfg.doc_id.parse().map_err(|e| {
+    let doc_id: DocumentId = cfg.doc_id.expose_secret().parse().map_err(|e| {
         anyhow!(
-            "configured doc_id {:?} is not a valid automerge document id: {e:?}",
-            cfg.doc_id
+            "configured doc_id ({}) is not a valid automerge document id: {e:?}",
+            cfg.doc_id.redacted()
         )
     })?;
     let repo = open_repo().await?;
@@ -84,17 +84,17 @@ pub async fn open_skein(cwd: &Path) -> Result<OpenedSkein> {
         Ok(None) => {
             if conn.is_some() {
                 bail!(
-                    "skein document {} was not found in the local cache, and {} \
-                     does not have it either.\nCheck the doc_id, or run `braid sync` \
-                     from a machine that has the skein.",
-                    cfg.doc_id,
+                    "skein {} was not found in the local cache, and {} \
+                     does not have it either.\nCheck the doc_id (`braid secret` shows \
+                     it), or run `braid sync` from a machine that has the skein.",
+                    cfg.doc_id.redacted(),
                     cfg.sync_server
                 )
             } else {
                 bail!(
-                    "skein document {} is not in the local cache and the sync \
+                    "skein {} is not in the local cache and the sync \
                      server is unreachable.\nReconnect and retry, or check the doc_id.",
-                    cfg.doc_id
+                    cfg.doc_id.redacted()
                 )
             }
         }

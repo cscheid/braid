@@ -126,15 +126,32 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
         std::fs::set_permissions(&secret_path, std::fs::Permissions::from_mode(0o600))?;
     }
 
+    // Print only a redacted prefix: full ids in stdout end up in CI logs
+    // and agent transcripts, and the id is a bearer capability. `braid
+    // secret` is the explicit disclosure path.
+    let redacted = crate::docid::DocId::new(doc_id).redacted();
     match opts.join {
-        Some(_) => println!("joined skein {doc_id}"),
-        None => println!("created skein {doc_id}"),
+        Some(_) => println!("joined skein {redacted}"),
+        None => println!("created skein {redacted}"),
     }
-    println!("wrote {}", secret_path.display());
+    println!("wrote {} (run `braid secret` to display the full doc id)", secret_path.display());
     println!(
         "reminder: add `{REPO_FILE_NAME}` to your .gitignore — the doc id grants \
          read/write access to this skein"
     );
+    Ok(())
+}
+
+/// Print the skein secret, deliberately. The TOML on stdout is paste-ready
+/// for another machine's `.braid.toml`; the warning goes to stderr so
+/// piping stays clean.
+pub fn secret(cwd: &Path) -> Result<()> {
+    let cfg = crate::config::load(cwd)?;
+    eprintln!(
+        "braid: this output grants read/write access to the skein — share deliberately"
+    );
+    println!("doc_id = \"{}\"", cfg.doc_id.expose_secret());
+    println!("sync_server = \"{}\"", cfg.sync_server);
     Ok(())
 }
 

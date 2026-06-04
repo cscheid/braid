@@ -6,6 +6,7 @@
 pub mod cache;
 pub mod commands;
 pub mod config;
+pub mod docid;
 pub mod import;
 pub mod sync;
 pub mod skein;
