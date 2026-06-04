@@ -1,0 +1,4 @@
+# Closest stable config to the pre-enforcement hand style (see strand
+# br-xtask-fmt-jeuvc2d0): compact struct literals and dense one-liners.
+# max_width stays at the default 100.
+use_small_heuristics = "Max"
