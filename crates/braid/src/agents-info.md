@@ -117,6 +117,13 @@ successor document. Run `braid rotate --adopt` if the error suggests it;
 otherwise ask a human for the new secret. Do not try to work around the
 error — writes to a rotated skein are abandoned.
 
+## MCP variant
+
+`braid mcp` exposes these operations as MCP tools for harnesses without a
+shell. If you are reading this, you have a shell — prefer the CLI; it has
+the complete surface (the MCP server deliberately omits secret/init/
+rotate, and gates delete/import behind a launch flag).
+
 ## Installing a braid skill ("tying the knot")
 
 To teach an agent harness about braid, install a skill that defers to this

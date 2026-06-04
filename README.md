@@ -159,6 +159,16 @@ Honest limits: rotation protects *future* reads and writes. The old
 document's history remains readable forever to anyone holding the old id;
 revocation cannot un-leak the past.
 
+## MCP server
+
+`braid mcp` serves the skein to MCP hosts over stdio — for shell-less
+agents (Claude Desktop, IDE assistants) or agents you deliberately
+sandbox: the server holds the secret and the agent **never possesses the
+doc id**. Three capability tiers (`--read-only` / default /
+`--enable-destructive`), honest tool annotations, call-time enforcement.
+Setup snippets and semantics: [docs/mcp.md](docs/mcp.md). Shell-capable
+agents should prefer the CLI (`braid agents-info`).
+
 ## Migrating from beads
 
 ```sh

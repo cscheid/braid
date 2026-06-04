@@ -223,10 +223,11 @@ beyond what `.braid.toml` already holds.
 - [x] hygiene e2e: full protocol transcript asserted free of the doc id
 
 ### Phase 2 — docs
-- [ ] README section + docs/mcp.md (host setup snippets: Claude Code,
-      Claude Desktop)
-- [ ] agents-info note (for shell agents: "an MCP variant exists; prefer
-      the CLI when you have a shell")
+- [x] README section + docs/mcp.md (host setup snippets: Claude Code,
+      Claude Desktop; capability tiers; semantics: structuredContent,
+      sync field, rotation behavior, stdout discipline)
+- [x] agents-info note (for shell agents: prefer the CLI; the MCP server
+      deliberately serves a reduced surface)
 
 ### Phase 3 — resources & notifications
 - [ ] `braid://ready`, `braid://strand/{id}`, `braid://skein` resources
