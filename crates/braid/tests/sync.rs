@@ -30,10 +30,7 @@ impl TestServer {
     }
 
     async fn start_scheme(scheme: &str) -> TestServer {
-        let repo = samod::Repo::build_tokio()
-            .with_storage(InMemoryStorage::new())
-            .load()
-            .await;
+        let repo = samod::Repo::build_tokio().with_storage(InMemoryStorage::new()).load().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("{scheme}://{addr}");
@@ -122,10 +119,7 @@ async fn fresh_clone_fetches_skein_from_server() {
 
     // Machine A: init against the test server, create an issue.
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "synced", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "synced", "--sync-server", &server.url]).assert().success();
     let doc_id = a.doc_id();
     create_issue(&a, &["From machine A"]);
 
@@ -133,11 +127,7 @@ async fn fresh_clone_fetches_skein_from_server() {
     // document from the server.
     let b = Clone_::new(tmp.path(), "b");
     b.write_secret(&doc_id, &server.url);
-    b.braid()
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("From machine A"));
+    b.braid().arg("list").assert().success().stdout(predicate::str::contains("From machine A"));
 
     server.stop().await;
 }
@@ -148,20 +138,13 @@ async fn fresh_clone_fetches_skein_over_websocket() {
     let server = TestServer::start_ws().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "synced", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "synced", "--sync-server", &server.url]).assert().success();
     let doc_id = a.doc_id();
     create_issue(&a, &["From machine A"]);
 
     let b = Clone_::new(tmp.path(), "b");
     b.write_secret(&doc_id, &server.url);
-    b.braid()
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("From machine A"));
+    b.braid().arg("list").assert().success().stdout(predicate::str::contains("From machine A"));
 
     server.stop().await;
 }
@@ -172,10 +155,7 @@ async fn two_clones_converge_over_websocket() {
     let server = TestServer::start_ws().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "synced", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "synced", "--sync-server", &server.url]).assert().success();
     let doc_id = a.doc_id();
 
     let b = Clone_::new(tmp.path(), "b");
@@ -201,10 +181,7 @@ async fn two_clones_converge_through_server() {
     let server = TestServer::start().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "synced", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "synced", "--sync-server", &server.url]).assert().success();
     let doc_id = a.doc_id();
 
     let b = Clone_::new(tmp.path(), "b");
@@ -231,20 +208,13 @@ async fn sync_command_fetches_and_reports() {
     let server = TestServer::start().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "synced", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "synced", "--sync-server", &server.url]).assert().success();
     create_issue(&a, &["one"]);
     create_issue(&a, &["two"]);
 
     let b = Clone_::new(tmp.path(), "b");
     b.write_secret(&a.doc_id(), &server.url);
-    b.braid()
-        .arg("sync")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("2 strand"));
+    b.braid().arg("sync").assert().success().stdout(predicate::str::contains("2 strand"));
 
     server.stop().await;
 }
@@ -255,10 +225,7 @@ async fn offline_falls_back_to_cache_with_warning() {
     let server = TestServer::start().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "synced", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "synced", "--sync-server", &server.url]).assert().success();
     create_issue(&a, &["created online"]);
 
     // Take the server away and point at a dead port.
@@ -312,10 +279,7 @@ async fn no_cache_mode_is_stateless() {
     let server = TestServer::start().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "synced", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "synced", "--sync-server", &server.url]).assert().success();
     create_issue(&a, &["persistent issue"]);
 
     // BRAID_NO_CACHE + live server: everything is fetched fresh and works.
@@ -360,11 +324,7 @@ async fn doc_created_offline_announces_on_first_sync() {
         .assert()
         .success();
     let doc_id = a.doc_id();
-    a.braid()
-        .env("BRAID_SYNC_TIMEOUT", "1")
-        .args(["create", "made offline"])
-        .assert()
-        .success();
+    a.braid().env("BRAID_SYNC_TIMEOUT", "1").args(["create", "made offline"]).assert().success();
 
     // Server comes up; repoint A at it and sync.
     let server = TestServer::start().await;
@@ -374,11 +334,7 @@ async fn doc_created_offline_announces_on_first_sync() {
     // A fresh clone can now fetch everything from the server.
     let b = Clone_::new(tmp.path(), "b");
     b.write_secret(&doc_id, &server.url);
-    b.braid()
-        .arg("list")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("made offline"));
+    b.braid().arg("list").assert().success().stdout(predicate::str::contains("made offline"));
 
     server.stop().await;
 }

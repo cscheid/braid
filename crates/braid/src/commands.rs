@@ -52,26 +52,22 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
         None => {
             let name = opts
                 .name
-                .or_else(|| {
-                    cwd.file_name().map(|n| n.to_string_lossy().into_owned())
-                })
+                .or_else(|| cwd.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "skein".to_string());
             let meta = SkeinMetadata {
                 schema_version: SCHEMA_VERSION,
                 name,
                 id_prefix: opts.prefix,
                 created_at: now_rfc3339(),
-        rotated_at: None,
-        rotated_to: None,
+                rotated_at: None,
+                rotated_to: None,
             };
             let mut doc = Automerge::new();
             doc.transact(|tx| init_skein(tx, &meta)).map_err(|f| f.error)?;
 
             let repo = open_repo().await?;
-            let handle = repo
-                .create(doc)
-                .await
-                .map_err(|_| anyhow!("samod repo stopped unexpectedly"))?;
+            let handle =
+                repo.create(doc).await.map_err(|_| anyhow!("samod repo stopped unexpectedly"))?;
             let id = handle.document_id().to_string();
 
             // Best-effort announce to the sync server (D13: init works
@@ -133,9 +129,7 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
 /// piping stays clean.
 pub fn secret(cwd: &Path) -> Result<()> {
     let cfg = crate::config::load(cwd)?;
-    eprintln!(
-        "braid: this output grants read/write access to the skein — share deliberately"
-    );
+    eprintln!("braid: this output grants read/write access to the skein — share deliberately");
     println!("doc_id = \"{}\"", cfg.doc_id.expose_secret());
     println!("sync_server = \"{}\"", cfg.sync_server);
     Ok(())
@@ -155,8 +149,7 @@ fn secret_file_contents(doc_id: &str, sync_server: &str) -> String {
 /// Write a `.braid.toml` (mode 600) — used by init, rotate, and adopt.
 fn write_secret_file(path: &Path, doc_id: &str, sync_server: &str) -> Result<()> {
     let contents = secret_file_contents(doc_id, sync_server);
-    std::fs::write(path, &contents)
-        .with_context(|| format!("cannot write {}", path.display()))?;
+    std::fs::write(path, &contents).with_context(|| format!("cannot write {}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -252,9 +245,8 @@ pub async fn rotate(cwd: &Path, revoke: bool) -> Result<()> {
         .await
         .map_err(|_| anyhow!("samod repo stopped unexpectedly"))?;
     let new_doc_id = new_handle.document_id().to_string();
-    let confirmed = tokio::time::timeout(sync_timeout(), new_handle.they_have_our_changes(conn))
-        .await
-        .is_ok();
+    let confirmed =
+        tokio::time::timeout(sync_timeout(), new_handle.they_have_our_changes(conn)).await.is_ok();
     if !confirmed {
         opened.close().await;
         bail!(
@@ -273,9 +265,7 @@ pub async fn rotate(cwd: &Path, revoke: bool) -> Result<()> {
         .doc
         .with_document(|d| d.transact(|tx| init_skein(tx, &rotated_meta)).map_err(|f| f.error))?;
     let marker_confirmed =
-        tokio::time::timeout(sync_timeout(), opened.doc.they_have_our_changes(conn))
-            .await
-            .is_ok();
+        tokio::time::timeout(sync_timeout(), opened.doc.they_have_our_changes(conn)).await.is_ok();
     if !marker_confirmed {
         opened.close().await;
         bail!(
@@ -350,8 +340,7 @@ pub async fn rotate_adopt(cwd: &Path) -> Result<()> {
             out.push_str(&serde_json::to_string(issue)?);
             out.push('\n');
         }
-        std::fs::write(&path, out)
-            .with_context(|| format!("cannot write {}", path.display()))?;
+        std::fs::write(&path, out).with_context(|| format!("cannot write {}", path.display()))?;
         let ids: Vec<&str> = stragglers.iter().map(|i| i.id.as_str()).collect();
         eprintln!(
             "braid: {} straggler strand{} modified in the old skein after \
@@ -490,7 +479,8 @@ fn format_issue(issue: &Issue) -> String {
         let _ = writeln!(out, "\n{d}");
     }
     for c in issue.comments.values() {
-        let _ = writeln!(out, "\n--- comment {} by {} at {}\n{}", c.id, c.author, c.created_at, c.text);
+        let _ =
+            writeln!(out, "\n--- comment {} by {} at {}\n{}", c.id, c.author, c.created_at, c.text);
     }
     out
 }
@@ -550,7 +540,12 @@ pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
     Ok(())
 }
 
-pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force: bool) -> Result<()> {
+pub async fn close(
+    cwd: &Path,
+    queries: &[String],
+    reason: Option<String>,
+    force: bool,
+) -> Result<()> {
     let session = Session::open(cwd).await?;
     let result = session.close_strands(queries, reason, force).await;
     session.shutdown().await;
@@ -769,8 +764,7 @@ pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&blocked)?);
     } else if !blocked.is_empty() {
         let id_w = blocked.iter().map(|b| b.issue.id.len()).max().unwrap_or(2);
-        let st_w =
-            blocked.iter().map(|b| b.issue.status.as_str().len()).max().unwrap_or(6).max(6);
+        let st_w = blocked.iter().map(|b| b.issue.status.as_str().len()).max().unwrap_or(6).max(6);
         let title_w = blocked.iter().map(|b| b.issue.title.len()).max().unwrap_or(0);
         for b in blocked {
             println!(
@@ -791,8 +785,8 @@ pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("cannot read {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     // Parse everything before touching the document: imports are atomic.
     let issues = crate::import::parse_jsonl(&text)?;
 

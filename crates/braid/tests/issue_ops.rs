@@ -20,10 +20,7 @@ impl Skein {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let t = Skein { home, work };
-        t.braid()
-            .args(["init", "--name", "ops", "--sync-server", DEAD_SERVER])
-            .assert()
-            .success();
+        t.braid().args(["init", "--name", "ops", "--sync-server", DEAD_SERVER]).assert().success();
         (tmp, t)
     }
 
@@ -97,10 +94,7 @@ fn update_empty_string_clears_optional_fields() {
     let (_tmp, t) = Skein::new();
     let id = t.create(&["Has extras", "--description", "to be removed", "--assignee", "x"]);
 
-    t.braid()
-        .args(["update", &id, "--description", "", "--assignee", ""])
-        .assert()
-        .success();
+    t.braid().args(["update", &id, "--description", "", "--assignee", ""]).assert().success();
 
     let after = t.show_json(&id);
     assert!(after.get("description").is_none(), "empty string clears description");
@@ -164,10 +158,7 @@ fn close_with_open_children_is_refused_without_force() {
     let (_tmp, t) = Skein::new();
     let epic = t.create(&["The epic", "--type", "epic"]);
     let child = t.create(&["The child"]);
-    t.braid()
-        .args(["dep", "add", &child, &epic, "--type", "parent-child"])
-        .assert()
-        .success();
+    t.braid().args(["dep", "add", &child, &epic, "--type", "parent-child"]).assert().success();
 
     // refused while the child is open
     t.braid()
@@ -213,8 +204,7 @@ fn comments_append_and_render() {
     let json = t.show_json(&id);
     let comments = json["comments"].as_object().unwrap();
     assert_eq!(comments.len(), 2);
-    let texts: Vec<&str> =
-        comments.values().map(|c| c["text"].as_str().unwrap()).collect();
+    let texts: Vec<&str> = comments.values().map(|c| c["text"].as_str().unwrap()).collect();
     assert!(texts.contains(&"first comment"));
     assert!(texts.contains(&"second comment"));
     for c in comments.values() {
@@ -222,9 +212,7 @@ fn comments_append_and_render() {
     }
 
     // human-readable show includes comments
-    t.braid()
-        .args(["show", &id])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("first comment").and(predicate::str::contains("second comment")));
+    t.braid().args(["show", &id]).assert().success().stdout(
+        predicate::str::contains("first comment").and(predicate::str::contains("second comment")),
+    );
 }

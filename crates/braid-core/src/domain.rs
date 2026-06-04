@@ -99,9 +99,7 @@ pub fn open_children<'t>(skein: &'t Skein, id: &str) -> Vec<&'t Issue> {
         .values()
         .filter(|i| !i.status.is_terminal())
         .filter(|i| {
-            i.dependencies
-                .values()
-                .any(|d| d.dep_type.is_hierarchical() && d.depends_on_id == id)
+            i.dependencies.values().any(|d| d.dep_type.is_hierarchical() && d.depends_on_id == id)
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));

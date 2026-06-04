@@ -53,8 +53,7 @@ async fn load_range_returns_original_keys() {
     storage.put(key(&[DOC_ID, "incremental", "h2"]), b"2".to_vec()).await;
     storage.put(key(&[DOC_ID, "snapshot", "s1"]), b"3".to_vec()).await;
 
-    let got: HashMap<StorageKey, Vec<u8>> =
-        storage.load_range(key(&[DOC_ID, "incremental"])).await;
+    let got: HashMap<StorageKey, Vec<u8>> = storage.load_range(key(&[DOC_ID, "incremental"])).await;
 
     assert_eq!(got.len(), 2);
     assert_eq!(got[&key(&[DOC_ID, "incremental", "h1"])], b"1".to_vec());
@@ -74,10 +73,7 @@ async fn document_id_never_appears_on_disk() {
     assert!(!paths.is_empty(), "storage should have written files");
     for p in &paths {
         let s = p.to_string_lossy();
-        assert!(
-            !s.contains(DOC_ID),
-            "document id leaked into path: {s}"
-        );
+        assert!(!s.contains(DOC_ID), "document id leaked into path: {s}");
         // also catch case-folded or prefix leaks of meaningful length
         assert!(
             !s.to_lowercase().contains(&DOC_ID.to_lowercase()),

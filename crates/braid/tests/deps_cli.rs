@@ -20,10 +20,7 @@ impl Skein {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let t = Skein { home, work };
-        t.braid()
-            .args(["init", "--name", "deps", "--sync-server", DEAD_SERVER])
-            .assert()
-            .success();
+        t.braid().args(["init", "--name", "deps", "--sync-server", DEAD_SERVER]).assert().success();
         (tmp, t)
     }
 
@@ -70,11 +67,7 @@ fn dep_add_list_remove_round_trip() {
         .assert()
         .success()
         .stdout(predicate::str::contains(&b).and(predicate::str::contains("blocks")));
-    t.braid()
-        .args(["dep", "list", &b])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(&a)); // incoming
+    t.braid().args(["dep", "list", &b]).assert().success().stdout(predicate::str::contains(&a)); // incoming
 
     t.braid().args(["dep", "remove", &a, &b]).assert().success();
     let json = t.show_json(&a);
@@ -161,11 +154,7 @@ fn ready_and_blocked_listings() {
 
     // closing the blocker frees the blocked issue
     t.braid().args(["close", &blocker]).assert().success();
-    t.braid()
-        .args(["ready"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(&blocked));
+    t.braid().args(["ready"]).assert().success().stdout(predicate::str::contains(&blocked));
     let out = t.braid().args(["blocked"]).assert().success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert!(!stdout.contains(&blocked));
@@ -186,10 +175,7 @@ fn parent_child_does_not_block_child_in_ready() {
     let (_tmp, t) = Skein::new();
     let epic = t.create(&["Epic", "--type", "epic"]);
     let child = t.create(&["Child task"]);
-    t.braid()
-        .args(["dep", "add", &child, &epic, "--type", "parent-child"])
-        .assert()
-        .success();
+    t.braid().args(["dep", "add", &child, &epic, "--type", "parent-child"]).assert().success();
 
     let out = t.braid().args(["ready"]).assert().success();
     let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();

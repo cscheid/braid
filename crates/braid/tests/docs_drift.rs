@@ -9,12 +9,8 @@ use std::path::PathBuf;
 
 fn braid_stdout(args: &[&str]) -> String {
     let mut c = assert_cmd::Command::cargo_bin("braid").unwrap();
-    let out = c
-        .env_clear()
-        .env("PATH", std::env::var("PATH").unwrap())
-        .args(args)
-        .assert()
-        .success();
+    let out =
+        c.env_clear().env("PATH", std::env::var("PATH").unwrap()).args(args).assert().success();
     String::from_utf8(out.get_output().stdout.clone()).unwrap()
 }
 
@@ -46,10 +42,8 @@ fn subcommands() -> Vec<String> {
 #[test]
 fn every_subcommand_is_documented_in_agents_info() {
     let info = braid_stdout(&["agents-info"]);
-    let missing: Vec<String> = subcommands()
-        .into_iter()
-        .filter(|name| !info.contains(&format!("braid {name}")))
-        .collect();
+    let missing: Vec<String> =
+        subcommands().into_iter().filter(|name| !info.contains(&format!("braid {name}"))).collect();
     assert!(
         missing.is_empty(),
         "agents-info (crates/braid/src/agents-info.md) does not mention: \
@@ -72,9 +66,25 @@ fn every_mcp_tool_is_documented_in_docs_mcp_md() {
     let info = braid_stdout(&["agents-info"]);
     let _ = info; // agents-info covers the CLI; docs/mcp.md covers tools
     for tool in [
-        "ready", "blocked", "list", "show", "search", "dep_list", "dep_cycles", "export",
-        "create", "update", "close", "reopen", "defer", "undefer", "comment", "dep_add",
-        "dep_remove", "braid_delete", "braid_import",
+        "ready",
+        "blocked",
+        "list",
+        "show",
+        "search",
+        "dep_list",
+        "dep_cycles",
+        "export",
+        "create",
+        "update",
+        "close",
+        "reopen",
+        "defer",
+        "undefer",
+        "comment",
+        "dep_add",
+        "dep_remove",
+        "braid_delete",
+        "braid_import",
     ] {
         assert!(
             doc.contains(tool),

@@ -495,10 +495,8 @@ impl Session {
     pub async fn reopen(&self, queries: &[String]) -> Result<Mutated<Reopened>> {
         let skein = self.hydrate()?;
 
-        let mut to_reopen: Vec<Issue> = queries
-            .iter()
-            .map(|q| resolve_issue(&skein, q).cloned())
-            .collect::<Result<_>>()?;
+        let mut to_reopen: Vec<Issue> =
+            queries.iter().map(|q| resolve_issue(&skein, q).cloned()).collect::<Result<_>>()?;
         let now = now_rfc3339();
         for issue in &mut to_reopen {
             issue.status = Status::Open;

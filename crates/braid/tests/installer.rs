@@ -242,8 +242,7 @@ fn unsupported_arch_dies_pointing_at_cargo_install() {
 fn installs_from_local_artifact_with_checksum() {
     let sb = Sandbox::new();
     let (url, sha) = make_artifact(sb.tmp.path());
-    let out =
-        sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)]);
+    let out = sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)]);
     assert_success(&out);
 
     let bin = sb.installed_binary();
@@ -281,8 +280,7 @@ fn checksum_mismatch_fails_and_installs_nothing() {
     let sb = Sandbox::new();
     let (url, _sha) = make_artifact(sb.tmp.path());
     let wrong = "0".repeat(64);
-    let out =
-        sb.run(&["--artifact-url", &url, "--checksum", &wrong, "--dest", &dest_arg(&sb)]);
+    let out = sb.run(&["--artifact-url", &url, "--checksum", &wrong, "--dest", &dest_arg(&sb)]);
     assert_failure(&out);
     assert!(stderr(&out).contains("mismatch"), "stderr: {}", stderr(&out));
 
@@ -297,14 +295,8 @@ fn checksum_mismatch_fails_and_installs_nothing() {
 fn malformed_checksum_is_rejected() {
     let sb = Sandbox::new();
     let (url, _sha) = make_artifact(sb.tmp.path());
-    let out = sb.run(&[
-        "--artifact-url",
-        &url,
-        "--checksum",
-        "not-a-sha",
-        "--dest",
-        &dest_arg(&sb),
-    ]);
+    let out =
+        sb.run(&["--artifact-url", &url, "--checksum", "not-a-sha", "--dest", &dest_arg(&sb)]);
     assert_failure(&out);
     assert!(!sb.installed_binary().exists());
 }
@@ -328,13 +320,8 @@ fn missing_checksum_refuses_to_install() {
 fn insecure_skip_checksum_installs_with_loud_warning() {
     let sb = Sandbox::new();
     let (url, _sha) = make_artifact(sb.tmp.path());
-    let out = sb.run(&[
-        "--artifact-url",
-        &url,
-        "--insecure-skip-checksum",
-        "--dest",
-        &dest_arg(&sb),
-    ]);
+    let out =
+        sb.run(&["--artifact-url", &url, "--insecure-skip-checksum", "--dest", &dest_arg(&sb)]);
     assert_success(&out);
     assert!(sb.installed_binary().is_file());
     assert!(
@@ -439,8 +426,7 @@ fn dest_flag_beats_braid_install_dir_env() {
 fn warns_when_dest_is_not_on_path() {
     let sb = Sandbox::new();
     let (url, sha) = make_artifact(sb.tmp.path());
-    let out =
-        sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)]);
+    let out = sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)]);
     assert_success(&out);
     assert!(stderr(&out).contains("PATH"), "expected PATH advice\nstderr: {}", stderr(&out));
 }
@@ -455,11 +441,7 @@ fn no_path_warning_when_dest_is_on_path() {
         &[("PATH", &path)],
     );
     assert_success(&out);
-    assert!(
-        !stderr(&out).contains("PATH"),
-        "unexpected PATH advice\nstderr: {}",
-        stderr(&out)
-    );
+    assert!(!stderr(&out).contains("PATH"), "unexpected PATH advice\nstderr: {}", stderr(&out));
 }
 
 // --- quiet mode ----------------------------------------------------------------
@@ -529,16 +511,9 @@ fn shellcheck_clean_if_available() {
         eprintln!("shellcheck not installed; skipping");
         return;
     }
-    let out = Command::new("shellcheck")
-        .arg("--severity=style")
-        .arg(install_sh())
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "shellcheck findings:\n{}",
-        String::from_utf8_lossy(&out.stdout)
-    );
+    let out =
+        Command::new("shellcheck").arg("--severity=style").arg(install_sh()).output().unwrap();
+    assert!(out.status.success(), "shellcheck findings:\n{}", String::from_utf8_lossy(&out.stdout));
 }
 
 // --- network (run manually / in Phase 4 once a release exists) ------------------

@@ -140,8 +140,7 @@ fn create_show_list_round_trip() {
 
     // show --json round-trips the fields
     let out = braid(&work, &home).args(["show", &id, "--json"]).assert().success();
-    let json: serde_json::Value =
-        serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
     assert_eq!(json["id"], id.as_str());
     assert_eq!(json["title"], "Fix the frobnicator");
     assert_eq!(json["description"], "It frobs when it should nicate.");
@@ -169,10 +168,7 @@ fn create_json_outputs_full_issue() {
     std::fs::create_dir_all(&work).unwrap();
     init_skein(&work, &home);
 
-    let out = braid(&work, &home)
-        .args(["create", "JSON output test", "--json"])
-        .assert()
-        .success();
+    let out = braid(&work, &home).args(["create", "JSON output test", "--json"]).assert().success();
     let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
     assert_eq!(json["title"], "JSON output test");
     assert!(json["id"].as_str().unwrap().starts_with("br-"));
@@ -211,10 +207,7 @@ fn list_status_filter_and_json() {
     assert_eq!(arr[0]["title"], "Second issue", "priority 0 sorts first");
 
     // status filtering
-    let out = braid(&work, &home)
-        .args(["list", "--status", "closed", "--json"])
-        .assert()
-        .success();
+    let out = braid(&work, &home).args(["list", "--status", "closed", "--json"]).assert().success();
     let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
     assert_eq!(json.as_array().unwrap().len(), 0);
 }
@@ -227,14 +220,9 @@ fn missing_config_gives_helpful_error() {
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&work).unwrap();
 
-    braid(&work, &home)
-        .args(["create", "doomed"])
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("BRAID_DOC_ID")
-                .and(predicate::str::contains("braid init")),
-        );
+    braid(&work, &home).args(["create", "doomed"]).assert().failure().stderr(
+        predicate::str::contains("BRAID_DOC_ID").and(predicate::str::contains("braid init")),
+    );
 }
 
 #[test]

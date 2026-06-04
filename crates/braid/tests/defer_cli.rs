@@ -58,11 +58,7 @@ impl Skein {
     fn ready_ids(&self) -> Vec<String> {
         let out = self.braid().args(["ready", "--json"]).assert().success();
         let rows: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
-        rows.as_array()
-            .unwrap()
-            .iter()
-            .map(|r| r["id"].as_str().unwrap().to_string())
-            .collect()
+        rows.as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
     }
 }
 
@@ -189,11 +185,7 @@ fn undefer_restores_open_and_clears_date() {
     let id = t.create(&["Wake me"]);
     t.braid().args(["defer", &id, "--until", FUTURE]).assert().success();
 
-    t.braid()
-        .args(["undefer", &id])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(&id));
+    t.braid().args(["undefer", &id]).assert().success().stdout(predicate::str::contains(&id));
 
     let json = t.show_json(&id);
     assert_eq!(json["status"], "open");

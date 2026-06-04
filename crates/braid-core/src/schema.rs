@@ -257,9 +257,7 @@ impl DependencyType {
     pub fn is_blocking(&self) -> bool {
         matches!(
             self,
-            DependencyType::Blocks
-                | DependencyType::ConditionalBlocks
-                | DependencyType::WaitsFor
+            DependencyType::Blocks | DependencyType::ConditionalBlocks | DependencyType::WaitsFor
         )
     }
 

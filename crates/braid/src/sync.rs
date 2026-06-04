@@ -29,7 +29,10 @@ pub fn sync_timeout() -> Duration {
 }
 
 pub enum Connect {
-    Connected { dialer: DialerHandle, conn: ConnectionId },
+    Connected {
+        dialer: DialerHandle,
+        conn: ConnectionId,
+    },
     /// The server could not be reached within the timeout. Carries a
     /// human-readable reason.
     Offline(String),
@@ -82,9 +85,7 @@ pub async fn connect(repo: &Repo, server_url: &str, timeout: Duration) -> Result
         Err(_elapsed) => {
             // Stop retrying: this invocation is now offline.
             dialer.close();
-            Ok(Connect::Offline(format!(
-                "could not reach {server_url} within {timeout:?}"
-            )))
+            Ok(Connect::Offline(format!("could not reach {server_url} within {timeout:?}")))
         }
     }
 }

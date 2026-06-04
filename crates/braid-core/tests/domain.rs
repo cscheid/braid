@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use braid_core::domain::{
-    active_blockers, blocked_issues, dependency_cycles, dependents_of, is_awake,
-    open_children, ready_issues,
+    active_blockers, blocked_issues, dependency_cycles, dependents_of, is_awake, open_children,
+    ready_issues,
 };
 use braid_core::schema::*;
 

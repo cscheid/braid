@@ -26,10 +26,7 @@ impl Skein {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let t = Skein { home, work };
-        t.braid()
-            .args(["init", "--name", "del", "--sync-server", DEAD_SERVER])
-            .assert()
-            .success();
+        t.braid().args(["init", "--name", "del", "--sync-server", DEAD_SERVER]).assert().success();
         (tmp, t)
     }
 
@@ -130,11 +127,7 @@ fn delete_with_dependents_requires_force() {
         .assert()
         .success()
         .stdout(predicate::str::contains("missing!"));
-    t.braid()
-        .args(["ready"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(&dependent));
+    t.braid().args(["ready"]).assert().success().stdout(predicate::str::contains(&dependent));
 }
 
 #[test]

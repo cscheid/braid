@@ -85,10 +85,7 @@ fn errors_redact_the_doc_id() {
 
     let out = t.braid().arg("list").assert().failure();
     let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
-    assert!(
-        !stderr.contains(&foreign),
-        "error output must not contain the full doc id:\n{stderr}"
-    );
+    assert!(!stderr.contains(&foreign), "error output must not contain the full doc id:\n{stderr}");
     let prefix: String = foreign.chars().take(6).collect();
     assert!(
         stderr.contains(&prefix),
@@ -118,11 +115,7 @@ fn braid_secret_warns_on_stderr() {
     // the warning must be on stderr so stdout stays cleanly pasteable
     let (_tmp, t) = Skein::new();
     t.init();
-    t.braid()
-        .arg("secret")
-        .assert()
-        .success()
-        .stderr(predicate::str::contains("read/write"));
+    t.braid().arg("secret").assert().success().stderr(predicate::str::contains("read/write"));
 }
 
 #[test]

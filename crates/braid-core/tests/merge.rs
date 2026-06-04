@@ -25,8 +25,8 @@ fn meta() -> SkeinMetadata {
         name: "merge-tests".into(),
         id_prefix: "br".into(),
         created_at: "2026-06-03T10:00:00.000000Z".into(),
-            rotated_at: None,
-            rotated_to: None,
+        rotated_at: None,
+        rotated_to: None,
     }
 }
 
@@ -73,9 +73,7 @@ fn base_and_forks(issues: Vec<Issue>) -> (Automerge, Automerge) {
 }
 
 fn apply(doc: &mut Automerge, issue: &Issue) {
-    doc.transact(|tx| reconcile_issue(tx, issue))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_issue(tx, issue)).map_err(|f| f.error).unwrap();
 }
 
 /// Merge in both directions and assert both replicas hydrate identically.
@@ -264,10 +262,7 @@ fn delete_vs_concurrent_edit_pins_automerge_semantics() {
     let base = issue("br-x");
     let (mut alice, mut bob) = base_and_forks(vec![base.clone()]);
 
-    alice
-        .transact(|tx| delete_issue(tx, "br-x"))
-        .map_err(|f| f.error)
-        .unwrap();
+    alice.transact(|tx| delete_issue(tx, "br-x")).map_err(|f| f.error).unwrap();
 
     let mut b = base.clone();
     b.title = "edited after alice deleted".into();

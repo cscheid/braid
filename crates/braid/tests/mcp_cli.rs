@@ -87,8 +87,7 @@ impl McpClient {
     async fn request(&mut self, method: &str, params: Value) -> Value {
         self.next_id += 1;
         let id = self.next_id;
-        self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
-            .await;
+        self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await;
         loop {
             let mut line = String::new();
             let n = tokio::time::timeout(
@@ -128,35 +127,23 @@ impl McpClient {
     }
 
     async fn tool_names(&mut self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .tools()
-            .await
-            .iter()
-            .map(|t| t["name"].as_str().unwrap().to_string())
-            .collect();
+        let mut names: Vec<String> =
+            self.tools().await.iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
         names.sort();
         names
     }
 
     /// Call a tool, expecting success; returns structuredContent.
     async fn call(&mut self, name: &str, args: Value) -> Value {
-        let resp = self
-            .request("tools/call", json!({"name": name, "arguments": args}))
-            .await;
+        let resp = self.request("tools/call", json!({"name": name, "arguments": args})).await;
         let result = &resp["result"];
-        assert_ne!(
-            result.get("isError"),
-            Some(&json!(true)),
-            "tool {name} failed: {resp}"
-        );
+        assert_ne!(result.get("isError"), Some(&json!(true)), "tool {name} failed: {resp}");
         result["structuredContent"].clone()
     }
 
     /// Call a tool without asserting the outcome: (is_error, error_text).
     async fn try_call(&mut self, name: &str, args: Value) -> (bool, String) {
-        let resp = self
-            .request("tools/call", json!({"name": name, "arguments": args}))
-            .await;
+        let resp = self.request("tools/call", json!({"name": name, "arguments": args})).await;
         if let Some(err) = resp.get("error") {
             return (true, err["message"].as_str().unwrap_or_default().to_string());
         }
@@ -168,18 +155,12 @@ impl McpClient {
 
     /// Call a tool, expecting a tool-level error; returns the error text.
     async fn call_expect_error(&mut self, name: &str, args: Value) -> String {
-        let resp = self
-            .request("tools/call", json!({"name": name, "arguments": args}))
-            .await;
+        let resp = self.request("tools/call", json!({"name": name, "arguments": args})).await;
         if let Some(err) = resp.get("error") {
             return err["message"].as_str().unwrap_or_default().to_string();
         }
         let result = &resp["result"];
-        assert_eq!(
-            result.get("isError"),
-            Some(&json!(true)),
-            "expected {name} to fail: {resp}"
-        );
+        assert_eq!(result.get("isError"), Some(&json!(true)), "expected {name} to fail: {resp}");
         result["content"][0]["text"].as_str().unwrap_or_default().to_string()
     }
 }
@@ -259,9 +240,7 @@ async fn read_only_serves_only_queries_and_refuses_calls() {
     );
 
     // defense in depth: a hidden tool must also refuse at call time
-    let err = client
-        .call_expect_error("braid_create", json!({"title": "sneaky"}))
-        .await;
+    let err = client.call_expect_error("braid_create", json!({"title": "sneaky"})).await;
     assert!(err.contains("read-only") || err.contains("not available"), "{err}");
 }
 
@@ -276,9 +255,7 @@ async fn destructive_tools_require_the_launch_flag() {
     let names = client.tool_names().await;
     assert!(!names.contains(&"braid_delete".to_string()));
     assert!(!names.contains(&"braid_import".to_string()));
-    let err = client
-        .call_expect_error("braid_delete", json!({"ids": ["br-x"]}))
-        .await;
+    let err = client.call_expect_error("braid_delete", json!({"ids": ["br-x"]})).await;
     assert!(err.contains("--enable-destructive") || err.contains("not available"), "{err}");
     drop(client);
 
@@ -325,8 +302,8 @@ async fn agent_workflow_end_to_end() {
     assert_eq!(created["sync"], "offline", "dead server -> offline outcome");
 
     // the structured record conforms to the published JSON Schema
-    let schema_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/schemas/strand.schema.json");
+    let schema_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/strand.schema.json");
     let schema: Value =
         serde_json::from_str(&std::fs::read_to_string(schema_path).unwrap()).unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();
@@ -339,34 +316,22 @@ async fn agent_workflow_end_to_end() {
     // update, comment, dep, ready, close
     let blocker = client.call("braid_create", json!({"title": "Blocker"})).await;
     let blocker_id = blocker["id"].as_str().unwrap().to_string();
-    client
-        .call("braid_dep_add", json!({"id": id, "target": blocker_id, "type": "blocks"}))
-        .await;
+    client.call("braid_dep_add", json!({"id": id, "target": blocker_id, "type": "blocks"})).await;
     let ready = client.call("braid_ready", json!({})).await;
-    let ready_ids: Vec<&str> = ready["strands"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|i| i["id"].as_str().unwrap())
-        .collect();
+    let ready_ids: Vec<&str> =
+        ready["strands"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
     assert!(ready_ids.contains(&blocker_id.as_str()));
     assert!(!ready_ids.contains(&id.as_str()), "blocked strand not ready");
 
     client.call("braid_comment", json!({"id": blocker_id, "text": "on it"})).await;
     client.call("braid_update", json!({"id": blocker_id, "status": "in_progress"})).await;
-    let closed = client
-        .call("braid_close", json!({"ids": [blocker_id], "reason": "done"}))
-        .await;
+    let closed = client.call("braid_close", json!({"ids": [blocker_id], "reason": "done"})).await;
     assert_eq!(closed["closed"][0]["status"], "closed");
 
     // blocker closed -> original strand becomes ready
     let ready = client.call("braid_ready", json!({})).await;
-    let ready_ids: Vec<&str> = ready["strands"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|i| i["id"].as_str().unwrap())
-        .collect();
+    let ready_ids: Vec<&str> =
+        ready["strands"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
     assert!(ready_ids.contains(&id.as_str()));
 
     // unknown tool is a clean error

@@ -243,10 +243,7 @@ impl Storage for FsStorage {
                                 result.insert(key, data);
                             }
                             Err(e) if is_not_found(&e) => {} // raced a delete
-                            Err(e) => panic!(
-                                "braid cache: cannot read {}: {e}",
-                                path.display()
-                            ),
+                            Err(e) => panic!("braid cache: cannot read {}: {e}", path.display()),
                         }
                     }
                 }

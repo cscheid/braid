@@ -77,10 +77,7 @@ mod tests {
 
     #[test]
     fn parse_until_accepts_bare_date_as_midnight_utc() {
-        assert_eq!(
-            parse_until("2026-07-01", NOW).as_deref(),
-            Some("2026-07-01T00:00:00.000000Z")
-        );
+        assert_eq!(parse_until("2026-07-01", NOW).as_deref(), Some("2026-07-01T00:00:00.000000Z"));
     }
 
     #[test]

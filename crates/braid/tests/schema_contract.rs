@@ -12,8 +12,8 @@ use predicates::prelude::*;
 const DEAD_SERVER: &str = "tcp://127.0.0.1:1";
 
 fn schema() -> jsonschema::Validator {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/schemas/strand.schema.json");
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/schemas/strand.schema.json");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
     let json: serde_json::Value = serde_json::from_str(&text).expect("schema is valid JSON");
@@ -22,11 +22,13 @@ fn schema() -> jsonschema::Validator {
 
 fn assert_conforms(validator: &jsonschema::Validator, line: &str) {
     let record: serde_json::Value = serde_json::from_str(line).expect("export line is JSON");
-    let errors: Vec<String> = validator
-        .iter_errors(&record)
-        .map(|e| format!("{e} (at {})", e.instance_path()))
-        .collect();
-    assert!(errors.is_empty(), "export line violates contract:\n{line}\nerrors:\n{}", errors.join("\n"));
+    let errors: Vec<String> =
+        validator.iter_errors(&record).map(|e| format!("{e} (at {})", e.instance_path())).collect();
+    assert!(
+        errors.is_empty(),
+        "export line violates contract:\n{line}\nerrors:\n{}",
+        errors.join("\n")
+    );
 }
 
 struct Skein {
@@ -97,7 +99,17 @@ fn cli_built_skein_exports_conforming_records() {
         "agent-7",
     ]);
     t.braid()
-        .args(["update", &full, "--design", "design notes", "--acceptance-criteria=- works", "--notes", "misc", "--external-ref", "https://example.com/x"])
+        .args([
+            "update",
+            &full,
+            "--design",
+            "design notes",
+            "--acceptance-criteria=- works",
+            "--notes",
+            "misc",
+            "--external-ref",
+            "https://example.com/x",
+        ])
         .assert()
         .success();
     t.braid().args(["comment", &full, "a comment"]).assert().success();
@@ -152,11 +164,8 @@ fn import_rejects_ids_the_contract_forbids() {
     let (_tmp, t) = Skein::new();
     for bad_id in ["has:colon", "has space"] {
         let file = t.work.join("bad.jsonl");
-        std::fs::write(
-            &file,
-            format!(r#"{{"id":"{bad_id}","title":"t","status":"open"}}"#) + "\n",
-        )
-        .unwrap();
+        std::fs::write(&file, format!(r#"{{"id":"{bad_id}","title":"t","status":"open"}}"#) + "\n")
+            .unwrap();
         t.braid()
             .args(["import", file.to_str().unwrap()])
             .assert()
@@ -189,30 +198,42 @@ fn schema_rejects_malformed_records() {
     };
 
     let cases: Vec<(&str, serde_json::Value)> = vec![
-        ("missing title", mutate(&|v| {
-            v.as_object_mut().unwrap().remove("title");
-        })),
+        (
+            "missing title",
+            mutate(&|v| {
+                v.as_object_mut().unwrap().remove("title");
+            }),
+        ),
         ("colon in id", mutate(&|v| v["id"] = "br:bad".into())),
         ("non-integer priority", mutate(&|v| v["priority"] = "high".into())),
         ("non-string defer_until", mutate(&|v| v["defer_until"] = 42.into())),
         ("unknown top-level field", mutate(&|v| v["surprise"] = true.into())),
         ("empty labels array", mutate(&|v| v["labels"] = serde_json::json!([]))),
         ("duplicate labels", mutate(&|v| v["labels"] = serde_json::json!(["a", "a"]))),
-        ("dependency missing type", mutate(&|v| {
-            v["dependencies"] = serde_json::json!({
-                "br-x:blocks": {"depends_on_id": "br-x", "created_at": "2026-06-04T00:00:00Z", "created_by": "x"}
-            })
-        })),
-        ("dependency key without colon", mutate(&|v| {
-            v["dependencies"] = serde_json::json!({
-                "br-x": {"depends_on_id": "br-x", "type": "blocks", "created_at": "2026-06-04T00:00:00Z", "created_by": "x"}
-            })
-        })),
-        ("comment missing text", mutate(&|v| {
-            v["comments"] = serde_json::json!({
-                "c-1": {"id": "c-1", "author": "x", "created_at": "2026-06-04T00:00:00Z"}
-            })
-        })),
+        (
+            "dependency missing type",
+            mutate(&|v| {
+                v["dependencies"] = serde_json::json!({
+                    "br-x:blocks": {"depends_on_id": "br-x", "created_at": "2026-06-04T00:00:00Z", "created_by": "x"}
+                })
+            }),
+        ),
+        (
+            "dependency key without colon",
+            mutate(&|v| {
+                v["dependencies"] = serde_json::json!({
+                    "br-x": {"depends_on_id": "br-x", "type": "blocks", "created_at": "2026-06-04T00:00:00Z", "created_by": "x"}
+                })
+            }),
+        ),
+        (
+            "comment missing text",
+            mutate(&|v| {
+                v["comments"] = serde_json::json!({
+                    "c-1": {"id": "c-1", "author": "x", "created_at": "2026-06-04T00:00:00Z"}
+                })
+            }),
+        ),
     ];
     for (name, record) in cases {
         assert!(!validator.is_valid(&record), "schema should reject: {name}\n{record}");

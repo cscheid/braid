@@ -18,10 +18,7 @@ impl Skein {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let t = Skein { home, work };
-        t.braid()
-            .args(["init", "--name", name, "--sync-server", DEAD_SERVER])
-            .assert()
-            .success();
+        t.braid().args(["init", "--name", name, "--sync-server", DEAD_SERVER]).assert().success();
         t
     }
 

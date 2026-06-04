@@ -23,10 +23,7 @@ impl Skein {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&work).unwrap();
         let t = Skein { home, work };
-        t.braid()
-            .args(["init", "--name", "fmt", "--sync-server", DEAD_SERVER])
-            .assert()
-            .success();
+        t.braid().args(["init", "--name", "fmt", "--sync-server", DEAD_SERVER]).assert().success();
         (tmp, t)
     }
 
@@ -76,10 +73,7 @@ fn list_columns_align_across_mixed_id_lengths() {
     );
     // and so do the status and type columns
     assert_eq!(col_of(&out, "task"), col_of(&out, "question"), "type columns:\n{out}");
-    let opens: Vec<usize> = out
-        .lines()
-        .filter_map(|l| l.find(" open"))
-        .collect();
+    let opens: Vec<usize> = out.lines().filter_map(|l| l.find(" open")).collect();
     assert_eq!(opens.len(), 2);
     assert_eq!(opens[0], opens[1], "status columns must align:\n{out}");
 }

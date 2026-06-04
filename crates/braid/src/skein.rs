@@ -42,8 +42,8 @@ fn env(k: &str) -> Option<String> {
 
 /// Open the braid cache as samod storage.
 pub fn open_cache() -> Result<cache::HashedKeyStorage<cache::FsStorage>> {
-    let dir = cache::cache_dir(&env)
-        .context("cannot determine a cache directory (HOME is not set)")?;
+    let dir =
+        cache::cache_dir(&env).context("cannot determine a cache directory (HOME is not set)")?;
     cache::open_cache_storage(&dir)
         .with_context(|| format!("cannot open braid cache at {}", dir.display()))
 }
@@ -60,10 +60,7 @@ pub async fn open_repo() -> Result<Repo> {
         !v.is_empty() && v != "0"
     });
     if no_cache {
-        Ok(Repo::build_tokio()
-            .with_storage(samod::storage::InMemoryStorage::new())
-            .load()
-            .await)
+        Ok(Repo::build_tokio().with_storage(samod::storage::InMemoryStorage::new()).load().await)
     } else {
         Ok(Repo::build_tokio().with_storage(open_cache()?).load().await)
     }
@@ -160,8 +157,8 @@ impl OpenedSkein {
     /// offline. Call before reading.
     pub async fn pull(&self) {
         if let Some(conn) = self.conn {
-            let _ = tokio::time::timeout(sync_timeout(), self.doc.we_have_their_changes(conn))
-                .await;
+            let _ =
+                tokio::time::timeout(sync_timeout(), self.doc.we_have_their_changes(conn)).await;
         }
     }
 
@@ -185,12 +182,10 @@ impl OpenedSkein {
     /// repo down (flushing the cache). Call after writing.
     pub async fn push_and_close(self) {
         if let Some(conn) = self.conn {
-            let confirmed = tokio::time::timeout(
-                sync_timeout(),
-                self.doc.they_have_our_changes(conn),
-            )
-            .await
-            .is_ok();
+            let confirmed =
+                tokio::time::timeout(sync_timeout(), self.doc.they_have_our_changes(conn))
+                    .await
+                    .is_ok();
             if !confirmed {
                 eprintln!(
                     "braid: changes saved locally, but the server did not confirm \

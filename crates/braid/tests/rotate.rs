@@ -21,10 +21,7 @@ struct TestServer {
 
 impl TestServer {
     async fn start() -> TestServer {
-        let repo = samod::Repo::build_tokio()
-            .with_storage(InMemoryStorage::new())
-            .load()
-            .await;
+        let repo = samod::Repo::build_tokio().with_storage(InMemoryStorage::new()).load().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("tcp://{addr}");
@@ -89,11 +86,7 @@ impl Clone_ {
     fn list_titles(&self) -> Vec<String> {
         let out = self.braid().args(["list", "--json"]).assert().success();
         let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
-        json.as_array()
-            .unwrap()
-            .iter()
-            .map(|i| i["title"].as_str().unwrap().to_string())
-            .collect()
+        json.as_array().unwrap().iter().map(|i| i["title"].as_str().unwrap().to_string()).collect()
     }
 }
 
@@ -104,10 +97,7 @@ async fn compact_rotation_carries_state_and_stale_clones_adopt() {
 
     // A: init, create strands.
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "rot", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "rot", "--sync-server", &server.url]).assert().success();
     let old_id = a.doc_id();
     a.create("first strand");
     a.create("second strand");
@@ -164,10 +154,7 @@ async fn revoke_rotation_leaves_no_pointer() {
     let server = TestServer::start().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "rev", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "rev", "--sync-server", &server.url]).assert().success();
     let old_id = a.doc_id();
     a.create("sensitive strand");
 
@@ -203,10 +190,7 @@ async fn adopt_detects_stragglers() {
     let server = TestServer::start().await;
 
     let a = Clone_::new(tmp.path(), "a");
-    a.braid()
-        .args(["init", "--name", "strag", "--sync-server", &server.url])
-        .assert()
-        .success();
+    a.braid().args(["init", "--name", "strag", "--sync-server", &server.url]).assert().success();
     let old_id = a.doc_id();
     a.create("pre-rotation strand");
 
@@ -242,10 +226,7 @@ async fn adopt_detects_stragglers() {
     // The adopted clone is on the new skein (1 strand) and can recover the
     // straggler by importing the file.
     assert_eq!(c.list_titles(), ["pre-rotation strand"]);
-    c.braid()
-        .args(["import", stragglers_file.to_str().unwrap()])
-        .assert()
-        .success();
+    c.braid().args(["import", stragglers_file.to_str().unwrap()]).assert().success();
     let mut titles = c.list_titles();
     titles.sort();
     assert_eq!(titles, ["pre-rotation strand", "straggler strand"]);

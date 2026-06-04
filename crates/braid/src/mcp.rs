@@ -482,12 +482,8 @@ impl BraidServer {
                 let p: P = serde_json::from_value(args)?;
                 Ok(serde_json::to_value(self.session.dep_list(&p.id)?)?)
             }
-            "braid_dep_cycles" => {
-                Ok(json!({"cycles": self.session.dep_cycles()?}))
-            }
-            "braid_export" => {
-                Ok(json!({"jsonl": self.session.export_jsonl()?}))
-            }
+            "braid_dep_cycles" => Ok(json!({"cycles": self.session.dep_cycles()?})),
+            "braid_export" => Ok(json!({"jsonl": self.session.export_jsonl()?})),
             "braid_create" => {
                 #[derive(Deserialize)]
                 struct P {
@@ -690,11 +686,7 @@ impl ServerHandler for BraidServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        let tools = specs()
-            .iter()
-            .filter(|s| self.visible(s.tier))
-            .map(to_tool)
-            .collect();
+        let tools = specs().iter().filter(|s| self.visible(s.tier)).map(to_tool).collect();
         Ok(ListToolsResult { tools, next_cursor: None, meta: None })
     }
 

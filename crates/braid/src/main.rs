@@ -326,8 +326,7 @@ async fn main() {
         Cmd::Export => commands::export(&cwd).await,
         Cmd::Sync => commands::sync(&cwd).await,
         Cmd::Mcp { project, read_only, enable_destructive } => {
-            braid::mcp::serve(braid::mcp::McpOpts { project, read_only, enable_destructive })
-                .await
+            braid::mcp::serve(braid::mcp::McpOpts { project, read_only, enable_destructive }).await
         }
     };
 

@@ -6,9 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use automerge::{Automerge, ReadDoc};
-use braid_core::amdoc::{
-    delete_issue, hydrate, init_skein, reconcile_issue, reconcile_skein,
-};
+use braid_core::amdoc::{delete_issue, hydrate, init_skein, reconcile_issue, reconcile_skein};
 use braid_core::schema::*;
 
 fn meta() -> SkeinMetadata {
@@ -139,10 +137,7 @@ fn full_issue(id: &str) -> Issue {
 }
 
 fn skein_with(issues: Vec<Issue>) -> Skein {
-    Skein {
-        metadata: meta(),
-        issues: issues.into_iter().map(|i| (i.id.clone(), i)).collect(),
-    }
+    Skein { metadata: meta(), issues: issues.into_iter().map(|i| (i.id.clone(), i)).collect() }
 }
 
 /// Write a Skein into a fresh automerge document.
@@ -236,9 +231,7 @@ fn text_field_is_updated_in_place_not_replaced() {
 
     // Mutate the description and reconcile.
     issue.description = Some("A description.\n\nWith paragraphs, edits, and `code`.".into());
-    doc.transact(|tx| reconcile_issue(tx, &issue))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
 
     let desc_obj_after = doc.get(&issue_obj, "description").unwrap().unwrap().1;
     assert_eq!(
@@ -258,17 +251,13 @@ fn optional_text_field_can_be_added_and_removed() {
 
     // Add notes.
     issue.notes = Some("now with notes".into());
-    doc.transact(|tx| reconcile_issue(tx, &issue))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
     let back = hydrate(&doc).unwrap();
     assert_eq!(back.issues["br-min001"].notes.as_deref(), Some("now with notes"));
 
     // Remove them again.
     issue.notes = None;
-    doc.transact(|tx| reconcile_issue(tx, &issue))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
     let back = hydrate(&doc).unwrap();
     assert_eq!(back.issues["br-min001"].notes, None);
 }
@@ -281,18 +270,14 @@ fn defer_until_can_be_set_and_cleared() {
     // Defer with a wake date.
     issue.status = Status::Deferred;
     issue.defer_until = Some("2026-07-01T00:00:00.000000Z".into());
-    doc.transact(|tx| reconcile_issue(tx, &issue))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
     let back = hydrate(&doc).unwrap();
     assert_eq!(back.issues["br-min001"], issue);
 
     // Undefer: status back to open, date cleared.
     issue.status = Status::Open;
     issue.defer_until = None;
-    doc.transact(|tx| reconcile_issue(tx, &issue))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
     let back = hydrate(&doc).unwrap();
     assert_eq!(back.issues["br-min001"], issue);
 }
@@ -309,9 +294,7 @@ fn labels_and_collections_reconcile_to_match() {
     issue.dependencies = BTreeMap::from([(kept_dep_key, kept)]);
     issue.comments.clear();
 
-    doc.transact(|tx| reconcile_issue(tx, &issue))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
 
     let back = hydrate(&doc).unwrap();
     assert_eq!(back.issues["br-full01"], issue);
@@ -322,22 +305,16 @@ fn delete_issue_removes_it() {
     let skein = skein_with(vec![minimal_issue("br-a"), minimal_issue("br-b")]);
     let mut doc = materialize(&skein);
 
-    let was_present = doc
-        .transact(|tx| delete_issue(tx, "br-a"))
-        .map_err(|f| f.error)
-        .unwrap()
-        .result;
+    let was_present =
+        doc.transact(|tx| delete_issue(tx, "br-a")).map_err(|f| f.error).unwrap().result;
     assert!(was_present);
 
     let back = hydrate(&doc).unwrap();
     assert!(!back.issues.contains_key("br-a"));
     assert!(back.issues.contains_key("br-b"));
 
-    let was_present = doc
-        .transact(|tx| delete_issue(tx, "br-a"))
-        .map_err(|f| f.error)
-        .unwrap()
-        .result;
+    let was_present =
+        doc.transact(|tx| delete_issue(tx, "br-a")).map_err(|f| f.error).unwrap().result;
     assert!(!was_present, "second delete reports absence");
 }
 
@@ -348,9 +325,7 @@ fn reconcile_skein_is_full_state_sync() {
 
     // Desired state drops br-b and adds br-c.
     let desired = skein_with(vec![minimal_issue("br-a"), minimal_issue("br-c")]);
-    doc.transact(|tx| reconcile_skein(tx, &desired))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| reconcile_skein(tx, &desired)).map_err(|f| f.error).unwrap();
 
     let back = hydrate(&doc).unwrap();
     assert_eq!(back, desired);
@@ -367,9 +342,7 @@ fn hydrate_rejects_future_schema_version() {
     let mut bad_meta = meta();
     bad_meta.schema_version = SCHEMA_VERSION + 1;
     let mut doc = Automerge::new();
-    doc.transact(|tx| init_skein(tx, &bad_meta))
-        .map_err(|f| f.error)
-        .unwrap();
+    doc.transact(|tx| init_skein(tx, &bad_meta)).map_err(|f| f.error).unwrap();
     let err = hydrate(&doc).unwrap_err();
     assert!(
         matches!(

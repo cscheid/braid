@@ -21,9 +21,7 @@ pub const MAX_SLUG_LEN: usize = 48;
 const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
 fn random_suffix(rng: &mut impl Rng) -> String {
-    (0..ID_SUFFIX_LEN)
-        .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
-        .collect()
+    (0..ID_SUFFIX_LEN).map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char).collect()
 }
 
 /// Generate an issue id: `<prefix>-<suffix>` or `<prefix>-<slug>-<suffix>`.

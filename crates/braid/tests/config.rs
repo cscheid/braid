@@ -93,10 +93,7 @@ fn user_config_via_marker() {
 
 #[test]
 fn author_chain_falls_back_to_os_user_then_unknown() {
-    let base = ConfigInputs {
-        env_doc_id: Some("env-doc".into()),
-        ..Default::default()
-    };
+    let base = ConfigInputs { env_doc_id: Some("env-doc".into()), ..Default::default() };
 
     let inputs = ConfigInputs { os_user: Some("os-author".into()), ..base.clone() };
     assert_eq!(resolve(&inputs).unwrap().author, "os-author");
@@ -258,10 +255,7 @@ fn gather_rejects_unknown_keys_in_braid_toml() {
     // Catches typos like `docid = ...` instead of silently ignoring them.
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join(".braid.toml"), "docid = \"oops\"\n").unwrap();
-    assert!(matches!(
-        gather_fs(tmp.path(), &env_map(&[])).unwrap_err(),
-        ConfigError::Parse { .. }
-    ));
+    assert!(matches!(gather_fs(tmp.path(), &env_map(&[])).unwrap_err(), ConfigError::Parse { .. }));
 }
 
 #[test]

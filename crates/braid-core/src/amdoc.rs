@@ -29,9 +29,7 @@
 
 use automerge::{ObjId, ObjType, ReadDoc, ScalarValue, Value, transaction::Transactable};
 
-use crate::schema::{
-    Comment, Dependency, Issue, SCHEMA_VERSION, Skein, SkeinMetadata,
-};
+use crate::schema::{Comment, Dependency, Issue, SCHEMA_VERSION, Skein, SkeinMetadata};
 
 #[derive(Debug, thiserror::Error)]
 pub enum HydrateError {
@@ -70,9 +68,10 @@ fn ensure_obj<T: Transactable>(
     ty: ObjType,
 ) -> Result<ObjId, automerge::AutomergeError> {
     if let Some((Value::Object(t), id)) = tx.get(parent, key)?
-        && t == ty {
-            return Ok(id);
-        }
+        && t == ty
+    {
+        return Ok(id);
+    }
     tx.put_object(parent, key, ty)
 }
 
@@ -168,10 +167,7 @@ fn reconcile_text<T: Transactable>(
 
 /// Initialize (or re-assert) the skein skeleton: `metadata` and the
 /// `issues` map. Idempotent: identical metadata generates no operations.
-pub fn init_skein<T: Transactable>(
-    tx: &mut T,
-    meta: &SkeinMetadata,
-) -> Result<(), ReconcileError> {
+pub fn init_skein<T: Transactable>(tx: &mut T, meta: &SkeinMetadata) -> Result<(), ReconcileError> {
     let meta_obj = ensure_obj(tx, &automerge::ROOT, "metadata", ObjType::Map)?;
     put_int_if_changed(tx, &meta_obj, "schema_version", meta.schema_version)?;
     put_str_if_changed(tx, &meta_obj, "name", &meta.name)?;
@@ -279,10 +275,7 @@ pub fn reconcile_issue<T: Transactable>(tx: &mut T, issue: &Issue) -> Result<(),
 /// issue, and **deletes issues not present in `skein`**. Full-state sync,
 /// meant for import-style flows; day-to-day mutation should use
 /// [`reconcile_issue`].
-pub fn reconcile_skein<T: Transactable>(
-    tx: &mut T,
-    skein: &Skein,
-) -> Result<(), ReconcileError> {
+pub fn reconcile_skein<T: Transactable>(tx: &mut T, skein: &Skein) -> Result<(), ReconcileError> {
     for (key, issue) in &skein.issues {
         if *key != issue.id {
             return Err(ReconcileError::IdMismatch { key: key.clone(), id: issue.id.clone() });
@@ -304,8 +297,7 @@ pub fn reconcile_skein<T: Transactable>(
 
 /// Remove an issue from the document. Returns `true` if it was present.
 pub fn delete_issue<T: Transactable>(tx: &mut T, id: &str) -> Result<bool, ReconcileError> {
-    let Some((Value::Object(ObjType::Map), issues_obj)) = tx.get(automerge::ROOT, "issues")?
-    else {
+    let Some((Value::Object(ObjType::Map), issues_obj)) = tx.get(automerge::ROOT, "issues")? else {
         return Ok(false);
     };
     if tx.get(&issues_obj, id)?.is_some() {
