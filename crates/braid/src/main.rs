@@ -114,6 +114,15 @@ enum Cmd {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Delete strands entirely (a delete wins over concurrent edits)
+    Delete {
+        #[arg(required = true)]
+        ids: Vec<String>,
+        /// Delete even if other strands still reference these (leaves
+        /// dangling, non-blocking edges)
+        #[arg(long)]
+        force: bool,
+    },
     /// Add a comment to a strand; prints the comment id
     Comment { id: String, text: String },
     /// Manage dependencies between strands
@@ -257,6 +266,7 @@ async fn main() {
         }
         Cmd::Close { ids, reason, force } => commands::close(&cwd, &ids, reason, force).await,
         Cmd::Reopen { ids } => commands::reopen(&cwd, &ids).await,
+        Cmd::Delete { ids, force } => commands::delete(&cwd, &ids, force).await,
         Cmd::Comment { id, text } => commands::comment(&cwd, &id, &text).await,
         Cmd::Dep { cmd } => match cmd {
             DepCmd::Add { issue, target, dep_type } => {

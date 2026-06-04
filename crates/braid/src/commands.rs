@@ -5,7 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 use automerge::Automerge;
-use braid_core::amdoc::{hydrate, init_skein, reconcile_issue};
+use braid_core::amdoc::{delete_issue, hydrate, init_skein, reconcile_issue};
 use braid_core::domain::{
     blocked_issues, dependency_cycles, dependents_of, open_children, ready_issues,
 };
@@ -701,6 +701,70 @@ pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
     opened.push_and_close().await;
 
     println!("{comment_id}");
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// delete
+// ---------------------------------------------------------------------------
+
+/// Remove strands from the skein entirely. Deletion is the sharpest
+/// mutation braid has — the pinned merge semantics say a delete wins over
+/// concurrent edits — so strands that other strands still reference are
+/// guarded behind `--force` (mirroring close's open-children protection).
+/// Forced deletion leaves dangling edges, which are contract-legal: they
+/// never block, and `dep list` shows them as `[missing!]`.
+pub async fn delete(cwd: &Path, queries: &[String], force: bool) -> Result<()> {
+    let opened = open_skein(cwd).await?;
+    let skein = opened.doc.with_document(|d| hydrate(d))?;
+
+    // Resolve and validate everything before mutating anything (atomic
+    // on bad input, same discipline as close/import).
+    let doomed: Vec<String> = queries
+        .iter()
+        .map(|q| resolve_issue(&skein, q).map(|i| i.id.clone()))
+        .collect::<Result<_>>()?;
+
+    for id in &doomed {
+        let dependents: Vec<&Issue> = dependents_of(&skein, id)
+            .into_iter()
+            // strands deleted in the same invocation don't count
+            .filter(|d| !doomed.contains(&d.id))
+            .collect();
+        if !dependents.is_empty() && !force {
+            let ids: Vec<&str> = dependents.iter().map(|i| i.id.as_str()).collect();
+            bail!(
+                "{id} is referenced by {}; deleting it would leave dangling \
+                 edges. Remove the dependencies first (`braid dep remove`) or \
+                 pass --force.",
+                ids.join(", ")
+            );
+        }
+        if !dependents.is_empty() {
+            let ids: Vec<&str> = dependents.iter().map(|i| i.id.as_str()).collect();
+            eprintln!(
+                "braid: {id} deleted; {} now hold{} dangling edges to it \
+                 (harmless: they never block)",
+                ids.join(", "),
+                if dependents.len() == 1 { "s" } else { "" }
+            );
+        }
+    }
+
+    opened.doc.with_document(|d| {
+        d.transact(|tx| {
+            for id in &doomed {
+                delete_issue(tx, id)?;
+            }
+            Ok::<_, braid_core::amdoc::ReconcileError>(())
+        })
+        .map_err(|f| f.error)
+    })?;
+    opened.push_and_close().await;
+
+    for id in &doomed {
+        println!("{id}");
+    }
     Ok(())
 }
 

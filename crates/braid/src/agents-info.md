@@ -64,6 +64,7 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid update <id> [flags]` | change fields: `--title --description --design --acceptance-criteria --notes --status --priority --type --assignee --external-ref --add-label --remove-label`; empty string clears |
 | `braid close <id>... [--reason R] [--force]` | close; refuses if open children unless `--force` |
 | `braid reopen <id>...` | reopen closed strands |
+| `braid delete <id>... [--force]` | remove strands entirely. Prefer `close` — a delete wins over concurrent edits and cannot be undone; `--force` needed if other strands reference the target |
 | `braid comment <id> <text>` | append a comment |
 | `braid dep add <id> <target> [--type T]` | `<id>` depends on `<target>`; default type `blocks` |
 | `braid dep remove <id> <target> [--type T]` | remove dependency |
