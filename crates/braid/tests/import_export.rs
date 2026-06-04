@@ -111,8 +111,8 @@ fn import_is_an_upsert() {
     t.braid().args(["import", jsonl.to_str().unwrap()]).assert().success();
     assert_eq!(t.show_json("bd-0a3b")["title"], "Cargo: upgrade rand");
 
-    // and nothing got duplicated
-    let out = t.braid().args(["list", "--json"]).assert().success();
+    // and nothing got duplicated (--all: both imported issues are closed)
+    let out = t.braid().args(["list", "--all", "--json"]).assert().success();
     let all: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
     assert_eq!(all.as_array().unwrap().len(), 2);
 }

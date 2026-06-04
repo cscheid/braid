@@ -89,7 +89,8 @@ fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "braid_list",
-            description: "List strands, optionally filtered by status.",
+            description: "List open (non-closed) strands. Filter to a single status \
+                          with `status`, or include closed strands with `all`.",
             tier: Tier::Query,
             idempotent: true,
             schema: || {
@@ -99,6 +100,10 @@ fn specs() -> Vec<ToolSpec> {
                         "status": {
                             "type": "string",
                             "description": "Filter: open|in_progress|blocked|deferred|closed"
+                        },
+                        "all": {
+                            "type": "boolean",
+                            "description": "Include closed strands (ignored when status is given)"
                         }
                     },
                     "additionalProperties": false
@@ -452,9 +457,11 @@ impl BraidServer {
                 #[derive(Deserialize)]
                 struct P {
                     status: Option<String>,
+                    #[serde(default)]
+                    all: bool,
                 }
                 let p: P = serde_json::from_value(args)?;
-                let strands = self.session.list(p.status.as_deref())?;
+                let strands = self.session.list(p.status.as_deref(), p.all)?;
                 Ok(json!({"strands": strands, "count": strands_len(&strands)}))
             }
             "braid_show" => {

@@ -57,7 +57,7 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 |---|---|
 | `braid ready [--json]` | active, unblocked strands — best starting point |
 | `braid blocked [--json]` | active strands blocked by dependencies, with blockers |
-| `braid list [--status S] [--json]` | all strands |
+| `braid list [--status S] [--all] [--json]` | open (non-closed) strands; `--all` includes closed |
 | `braid show <id> [--json]` | one strand (unique id fragments work: `braid show 6j42`) |
 | `braid search <text> [--json]` | case-insensitive substring over titles, prose, labels, comments |
 | `braid create <title> [flags]` | new strand; prints its id. Flags: `--description --type --priority --label --slug --assignee --json` |

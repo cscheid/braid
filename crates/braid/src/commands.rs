@@ -864,9 +864,9 @@ pub async fn sync(cwd: &Path) -> Result<()> {
 // list
 // ---------------------------------------------------------------------------
 
-pub async fn list(cwd: &Path, status: Option<String>, json: bool) -> Result<()> {
+pub async fn list(cwd: &Path, status: Option<String>, all: bool, json: bool) -> Result<()> {
     let session = Session::open(cwd).await?;
-    let issues = session.list(status.as_deref());
+    let issues = session.list(status.as_deref(), all);
     session.shutdown().await;
     let issues = issues?;
 

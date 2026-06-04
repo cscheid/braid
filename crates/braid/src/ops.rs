@@ -269,14 +269,16 @@ impl Session {
             .collect())
     }
 
-    pub fn list(&self, status: Option<&str>) -> Result<Vec<Issue>> {
+    /// List strands: open (non-closed) ones by default, a single status
+    /// when `status` is given, everything when `all` is set.
+    pub fn list(&self, status: Option<&str>, all: bool) -> Result<Vec<Issue>> {
         let skein = self.hydrate()?;
         let mut issues: Vec<&Issue> = skein
             .issues
             .values()
             .filter(|i| match status {
                 Some(s) => i.status.as_str() == s,
-                None => true,
+                None => all || !i.status.is_terminal(),
             })
             .collect();
         issues.sort_by(|a, b| listing_order(a, b));

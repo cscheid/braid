@@ -213,6 +213,48 @@ fn list_status_filter_and_json() {
 }
 
 #[test]
+fn list_defaults_to_open_strands() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&work).unwrap();
+    init_skein(&work, &home);
+
+    let kept = create_issue(&work, &home, &["Still open"]);
+    let later = create_issue(&work, &home, &["For later"]);
+    braid(&work, &home).args(["update", &later, "--status", "deferred"]).assert().success();
+    let done = create_issue(&work, &home, &["Already done"]);
+    braid(&work, &home).args(["close", &done, "--reason", "test"]).assert().success();
+
+    // default listing hides closed strands, but keeps every non-closed
+    // status (deferred included) — "open" in the colloquial sense
+    let out = braid(&work, &home).args(["list", "--json"]).assert().success();
+    let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    assert!(arr.iter().all(|i| i["id"] != done.as_str()));
+    assert!(arr.iter().any(|i| i["id"] == kept.as_str()));
+
+    // ...in the human listing too
+    braid(&work, &home).arg("list").assert().success().stdout(
+        predicate::str::contains("Still open").and(predicate::str::contains("Already done").not()),
+    );
+
+    // --all shows everything
+    let out = braid(&work, &home).args(["list", "--all", "--json"]).assert().success();
+    let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 3);
+
+    // an explicit --status filter overrides the default
+    let out = braid(&work, &home).args(["list", "--status", "closed", "--json"]).assert().success();
+    let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], done.as_str());
+}
+
+#[test]
 fn missing_config_gives_helpful_error() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");

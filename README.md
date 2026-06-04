@@ -65,7 +65,7 @@ On another machine / clone / worktree of the same project:
 
 ```sh
 braid init --join <doc-id>  # paste the doc id from the first machine
-braid list                  # fetches everything from the sync server
+braid list                  # open strands, fetched from the sync server
 ```
 
 Agents: run `braid agents-info` for a complete, version-matched usage

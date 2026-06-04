@@ -58,11 +58,14 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// List strands
+    /// List strands (open ones by default; --all includes closed)
     List {
         /// Filter by status (open|in_progress|blocked|deferred|closed)
         #[arg(long)]
         status: Option<String>,
+        /// Include closed strands
+        #[arg(long, conflicts_with = "status")]
+        all: bool,
         #[arg(long)]
         json: bool,
     },
@@ -253,7 +256,7 @@ async fn main() {
             .await
         }
         Cmd::Show { id, json } => commands::show(&cwd, &id, json).await,
-        Cmd::List { status, json } => commands::list(&cwd, status, json).await,
+        Cmd::List { status, all, json } => commands::list(&cwd, status, all, json).await,
         Cmd::Update {
             id,
             title,
