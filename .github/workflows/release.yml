@@ -6,14 +6,24 @@
 #
 #   braid-<version>-<platform>.tar.gz          single member: braid
 #   braid-<version>-<platform>.tar.gz.sha256   "<sha256>  <filename>"
-#   checksums.sha256                           all of the above, combined
+#   braid-<version>-<platform>.tar.gz.minisig  minisign (Ed25519) signature;
+#                                              trusted comment = the archive
+#                                              filename (replay protection —
+#                                              install.sh compares it)
+#   checksums.sha256                           all .sha256 lines, combined
 #
 # <version> has no "v" prefix in filenames; the tag does (v0.1.0 →
 # braid-0.1.0-darwin_arm64.tar.gz). Linux binaries are statically linked
 # musl, so one artifact per arch runs on every distro, Alpine included —
 # and the CI musl job has already gated the suite against that target.
 #
-# Plan: claude-notes/plans/2026/06/04/installer.md (strand br-iju0n3gd)
+# Signing key: MINISIGN_SECRET_KEY repo secret; the public half is pinned
+# in install.sh (MINISIGN_PUBKEY) and README. The sign step verifies its
+# output against the key extracted from install.sh, so a secret/pinned-key
+# mismatch fails the release instead of shipping unverifiable artifacts.
+#
+# Plans: claude-notes/plans/2026/06/04/installer.md (strand br-iju0n3gd),
+#        claude-notes/plans/2026/06/04/minisign-signing.md (br-dgvi0nme)
 
 name: Release
 
@@ -127,12 +137,41 @@ jobs:
             shasum -a 256 -c "$ARCHIVE.sha256"
           fi
 
+      - name: Install minisign
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install minisign
+          else
+            sudo apt-get update && sudo apt-get install -y minisign
+          fi
+
+      # Trusted comment = archive filename: it is part of the signed
+      # payload, and install.sh compares it against the file it asked
+      # for, so a signature cannot be replayed from another artifact.
+      - name: Sign archive (minisign, Ed25519)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          ARCHIVE="braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz"
+          key="$(mktemp "${RUNNER_TEMP}/minisign-key.XXXXXX")"
+          trap 'rm -f "$key"' EXIT
+          chmod 600 "$key"
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          minisign -Sm "$ARCHIVE" -s "$key" -t "$ARCHIVE"
+          # Verify with the public key pinned in install.sh: a mismatch
+          # between the repo secret and the pinned key fails the release
+          # here instead of shipping artifacts no installer can verify.
+          PUBKEY="$(sed -n 's/^MINISIGN_PUBKEY="\(.*\)"$/\1/p' install.sh)"
+          test -n "$PUBKEY"
+          minisign -Vm "$ARCHIVE" -P "$PUBKEY"
+
       - uses: actions/upload-artifact@v7
         with:
           name: braid-${{ matrix.platform }}
           path: |
             braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz
             braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz.sha256
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz.minisig
           retention-days: 7
           if-no-files-found: error
 
@@ -158,10 +197,14 @@ jobs:
           VERSION="${{ needs.preflight.outputs.version }}"
           MISSING=()
           for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
-            [ -f "braid-${VERSION}-${platform}.tar.gz" ] || MISSING+=("$platform")
+            for f in "braid-${VERSION}-${platform}.tar.gz" \
+                     "braid-${VERSION}-${platform}.tar.gz.sha256" \
+                     "braid-${VERSION}-${platform}.tar.gz.minisig"; do
+              [ -f "$f" ] || MISSING+=("$f")
+            done
           done
           if [ ${#MISSING[@]} -gt 0 ]; then
-            echo "::error::missing platform artifacts: ${MISSING[*]}"
+            echo "::error::missing release files: ${MISSING[*]}"
             exit 1
           fi
           cat -- *.sha256 | sort -k2 > checksums.sha256
@@ -190,7 +233,14 @@ jobs:
             echo "| macOS Intel | \`braid-${VERSION}-darwin_amd64.tar.gz\` |"
             echo "| macOS Apple Silicon | \`braid-${VERSION}-darwin_arm64.tar.gz\` |"
             echo
-            echo "Verify a manual download: \`sha256sum -c checksums.sha256 --ignore-missing\`"
+            echo "**Verify a manual download** (archives are signed with [minisign](https://jedisct1.github.io/minisign/), Ed25519):"
+            echo
+            echo '```sh'
+            echo "minisign -Vm braid-${VERSION}-<platform>.tar.gz -P RWSbWhSzVkkTRO4nFMzL/KyRs9oicbgy/2KPRK+o9hxznRYx9ZkHwwlN"
+            echo '```'
+            echo
+            echo "The trusted comment should name exactly the file you downloaded."
+            echo "Checksums only (no authenticity): \`sha256sum -c checksums.sha256 --ignore-missing\`"
             echo
             echo "## Changes"
             echo
@@ -214,4 +264,5 @@ jobs:
             --notes-file notes.md \
             --verify-tag \
             "${PRERELEASE[@]}" \
-            artifacts/braid-*.tar.gz artifacts/braid-*.tar.gz.sha256 artifacts/checksums.sha256
+            artifacts/braid-*.tar.gz artifacts/braid-*.tar.gz.sha256 \
+            artifacts/braid-*.tar.gz.minisig artifacts/checksums.sha256

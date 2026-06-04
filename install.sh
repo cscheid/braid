@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# braid installer — downloads a release binary, verifies its checksum,
-# and installs it atomically.
+# braid installer — downloads a release binary, verifies its checksum
+# and Ed25519 signature, and installs it atomically.
 #
 # One-liner:
 #   curl -fsSL https://raw.githubusercontent.com/cscheid/braid/main/install.sh | bash
@@ -15,6 +15,15 @@
 #     piped-stdin re-exec machinery larger installers carry.
 #   - Checksum verification is mandatory. Installing an unverified
 #     binary requires the explicit --insecure-skip-checksum flag.
+#   - Signature verification is mandatory too (strand br-dgvi0nme): a
+#     checksum proves integrity, not authenticity — whoever can replace
+#     the artifact on the release can replace its .sha256 alongside.
+#     Each archive is signed with minisign (Ed25519); the public key is
+#     pinned in this script, which ships from the main branch — a trust
+#     path an attacker with mere release-asset access cannot touch.
+#     minisign is packaged everywhere (brew/apt/dnf/apk/...), so absence
+#     is a refusal with install guidance, not a silent downgrade;
+#     --insecure-skip-signature is the explicit escape hatch.
 #   - Linux binaries are statically linked against musl, so one artifact
 #     per architecture covers every distro, Alpine included.
 #   - Tested by crates/braid/tests/installer.rs, offline, through
@@ -30,11 +39,20 @@ OWNER="${BRAID_REPO_OWNER:-cscheid}"
 REPO="${BRAID_REPO_NAME:-braid}"
 BINARY_NAME="braid"
 
+# The braid release signing key (minisign/Ed25519, key ID 44134956B3145A9B).
+# Generated 2026-06-04; signs releases from v0.2.1 on. Also published in
+# the README and in release notes.
+MINISIGN_PUBKEY="RWSbWhSzVkkTRO4nFMzL/KyRs9oicbgy/2KPRK+o9hxznRYx9ZkHwwlN"
+# Test hook: lets the test suite simulate a machine without minisign.
+# No weaker than PATH, which an attacker in this position also controls.
+MINISIGN_BIN="${BRAID_MINISIGN:-minisign}"
+
 VERSION=""
 DEST=""
 ARTIFACT_URL=""
 CHECKSUM=""
 INSECURE_SKIP_CHECKSUM=0
+INSECURE_SKIP_SIGNATURE=0
 FROM_SOURCE=0
 UNINSTALL=0
 PRINT_PLATFORM=0
@@ -74,6 +92,9 @@ Options:
   --artifact-url URL        Install from a specific artifact URL (file:// works)
   --checksum SHA256         Expected SHA-256 of the artifact
   --insecure-skip-checksum  Allow installation when no checksum is available
+  --minisign-pubkey KEY     minisign public key to verify signatures against
+                            (default: the braid release key pinned in this script)
+  --insecure-skip-signature Skip Ed25519 signature verification
   --from-source             Build with cargo from a fresh clone instead
   --uninstall               Remove the installed binary
   --print-platform          Print the detected platform string and exit
@@ -106,6 +127,9 @@ while [ $# -gt 0 ]; do
         --checksum)   need_value "$1" $#; CHECKSUM="$2"; shift 2 ;;
         --checksum=*) CHECKSUM="${1#*=}"; shift ;;
         --insecure-skip-checksum) INSECURE_SKIP_CHECKSUM=1; shift ;;
+        --minisign-pubkey)   need_value "$1" $#; MINISIGN_PUBKEY="$2"; shift 2 ;;
+        --minisign-pubkey=*) MINISIGN_PUBKEY="${1#*=}"; shift ;;
+        --insecure-skip-signature) INSECURE_SKIP_SIGNATURE=1; shift ;;
         --from-source)    FROM_SOURCE=1; shift ;;
         --uninstall)      UNINSTALL=1; shift ;;
         --print-platform) PRINT_PLATFORM=1; shift ;;
@@ -248,6 +272,53 @@ verify_checksum() {
 }
 
 # ============================================================================
+# Signature verification: Ed25519 via minisign, against the public key
+# pinned at the top of this script. Mandatory, like checksums: skipping
+# requires the explicit --insecure-skip-signature flag. The trusted
+# comment must equal the archive filename (Zig's discipline), so a
+# validly signed *different* artifact — say, an older release — cannot
+# be replayed under this name.
+# ============================================================================
+verify_signature() {
+    local file="$1" sig="$2" name="$3"
+
+    if [ "$INSECURE_SKIP_SIGNATURE" -eq 1 ]; then
+        log_warn "signature NOT checked; authenticity UNVERIFIED (--insecure-skip-signature)"
+        return 0
+    fi
+
+    command -v "$MINISIGN_BIN" >/dev/null 2>&1 || die "minisign is required to verify the release signature. Install it first:
+    brew install minisign         (macOS)
+    sudo apt install minisign     (Debian/Ubuntu)
+    sudo dnf install minisign     (Fedora)
+    apk add minisign              (Alpine)
+  then re-run this script — or (not recommended) re-run with
+  --insecure-skip-signature."
+
+    [ -f "$sig" ] || die "no signature (.minisig) available for $name; refusing to install.
+  Provide ${name}.minisig next to the artifact, or (not recommended)
+  re-run with --insecure-skip-signature."
+
+    local verify_out
+    if ! verify_out=$("$MINISIGN_BIN" -Vm "$file" -x "$sig" -P "$MINISIGN_PUBKEY" 2>&1); then
+        die "signature verification FAILED for $name:
+$verify_out
+  The artifact was not signed by the braid release key. Do not install it."
+    fi
+
+    local comment
+    comment=$(printf '%s\n' "$verify_out" | sed -n 's/^Trusted comment: //p')
+    if [ "$comment" != "$name" ]; then
+        die "trusted comment mismatch for $name:
+  expected: $name
+  got:      $comment
+  The signature is valid but for a different artifact (possibly an older
+  release replayed under this name). Do not install it."
+    fi
+    log_success "signature verified (trusted comment: $comment)"
+}
+
+# ============================================================================
 # Atomic install: write next to the destination, then rename. A crash
 # mid-install can never leave a truncated binary on PATH.
 # ============================================================================
@@ -288,6 +359,12 @@ install_from_artifact() {
         expected="$(awk '{print $1; exit}' "$TMP/expected.sha256")"
     fi
     verify_checksum "$TMP/$archive_name" "$expected" "$archive_name"
+
+    local sig="$TMP/$archive_name.minisig"
+    if [ "$INSECURE_SKIP_SIGNATURE" -eq 0 ]; then
+        download_file "${url}.minisig" "$sig" || true # absence handled below
+    fi
+    verify_signature "$TMP/$archive_name" "$sig" "$archive_name"
 
     log_step "extracting..."
     mkdir -p "$TMP/extract"

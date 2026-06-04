@@ -15,6 +15,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 
 use sha2::{Digest, Sha256};
 
@@ -66,7 +67,9 @@ impl Sandbox {
             .args(args)
             .env_clear()
             .env("HOME", self.home())
-            .env("PATH", SYSTEM_PATH);
+            // minisign is appended (not prepended) so system tools keep
+            // priority; on Linux it is usually in /usr/bin already.
+            .env("PATH", default_sandbox_path());
         for (k, v) in envs {
             cmd.env(k, v);
         }
@@ -147,6 +150,92 @@ fn dest_arg(sb: &Sandbox) -> String {
     sb.dest().display().to_string()
 }
 
+// --- minisign test helpers ---------------------------------------------------
+//
+// Signatures are part of the artifact contract, so the suite REQUIRES
+// minisign on the host (CI installs it; locally: `brew install minisign`
+// or `apt-get install minisign`). A silent skip-if-missing would leave
+// the contract unguarded, so absence is a loud failure instead.
+
+fn minisign_bin() -> &'static Path {
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        let out = Command::new("which").arg("minisign").output().expect("run `which`");
+        assert!(
+            out.status.success(),
+            "installer tests require minisign \
+             (brew install minisign / apt-get install minisign)"
+        );
+        PathBuf::from(String::from_utf8(out.stdout).unwrap().trim())
+    })
+}
+
+/// Sandbox PATH: system dirs plus (appended) the host minisign's
+/// directory, which on macOS lives outside SYSTEM_PATH.
+fn default_sandbox_path() -> String {
+    format!("{}:{}", SYSTEM_PATH, minisign_bin().parent().unwrap().display())
+}
+
+/// A throwaway unencrypted signing keypair (the shape CI uses).
+struct TestKey {
+    key_file: PathBuf,
+    pub_key: String,
+}
+
+impl TestKey {
+    fn generate(dir: &Path) -> TestKey {
+        let pub_file = dir.join("test-minisign.pub");
+        let key_file = dir.join("test-minisign.key");
+        let out = Command::new(minisign_bin())
+            .args(["-G", "-W", "-f", "-p"])
+            .arg(&pub_file)
+            .arg("-s")
+            .arg(&key_file)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "minisign -G failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // .pub layout: an untrusted-comment line, then the key itself.
+        let pub_key =
+            fs::read_to_string(&pub_file).unwrap().lines().nth(1).unwrap().trim().to_owned();
+        TestKey { key_file, pub_key }
+    }
+
+    /// Sign `file` with the given trusted comment, producing `file.minisig`.
+    fn sign_with_comment(&self, file: &Path, comment: &str) {
+        let out = Command::new(minisign_bin())
+            .arg("-Sm")
+            .arg(file)
+            .arg("-s")
+            .arg(&self.key_file)
+            .args(["-t", comment])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "minisign -Sm failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Sign `file` the way release.yml does: trusted comment = filename.
+    fn sign(&self, file: &Path) {
+        self.sign_with_comment(file, file.file_name().unwrap().to_str().unwrap());
+    }
+}
+
+/// `make_artifact` plus a valid signature under a fresh keypair.
+/// Returns (artifact url, sha256, public key for --minisign-pubkey).
+fn make_signed_artifact(dir: &Path) -> (String, String, String) {
+    let (url, sha) = make_artifact(dir);
+    let key = TestKey::generate(dir);
+    key.sign(Path::new(url.strip_prefix("file://").unwrap()));
+    (url, sha, key.pub_key)
+}
+
 // --- help & argument handling ----------------------------------------------
 
 #[test]
@@ -161,6 +250,8 @@ fn help_lists_every_flag_and_exits_zero() {
         "--artifact-url",
         "--checksum",
         "--insecure-skip-checksum",
+        "--minisign-pubkey",
+        "--insecure-skip-signature",
         "--from-source",
         "--uninstall",
         "--print-platform",
@@ -241,8 +332,17 @@ fn unsupported_arch_dies_pointing_at_cargo_install() {
 #[test]
 fn installs_from_local_artifact_with_checksum() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
-    let out = sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)]);
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--minisign-pubkey",
+        &pk,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
     assert_success(&out);
 
     let bin = sb.installed_binary();
@@ -256,18 +356,21 @@ fn installs_from_local_artifact_with_checksum() {
     // Progress goes to stderr; stdout stays clean for scripting.
     assert_eq!(stdout(&out), "", "stdout should be empty");
     assert!(stderr(&out).contains("checksum verified"), "stderr: {}", stderr(&out));
+    assert!(stderr(&out).contains("signature verified"), "stderr: {}", stderr(&out));
 }
 
 #[test]
 fn creates_dest_directory_if_missing() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
     let deep = sb.tmp.path().join("a/b/c");
     let out = sb.run(&[
         "--artifact-url",
         &url,
         "--checksum",
         &sha,
+        "--minisign-pubkey",
+        &pk,
         "--dest",
         &deep.display().to_string(),
     ]);
@@ -319,9 +422,16 @@ fn missing_checksum_refuses_to_install() {
 #[test]
 fn insecure_skip_checksum_installs_with_loud_warning() {
     let sb = Sandbox::new();
-    let (url, _sha) = make_artifact(sb.tmp.path());
-    let out =
-        sb.run(&["--artifact-url", &url, "--insecure-skip-checksum", "--dest", &dest_arg(&sb)]);
+    let (url, _sha, pk) = make_signed_artifact(sb.tmp.path());
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--insecure-skip-checksum",
+        "--minisign-pubkey",
+        &pk,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
     assert_success(&out);
     assert!(sb.installed_binary().is_file());
     assert!(
@@ -334,7 +444,7 @@ fn insecure_skip_checksum_installs_with_loud_warning() {
 #[test]
 fn checksum_sidecar_file_is_used_automatically() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
     let archive_path = url.strip_prefix("file://").unwrap();
     fs::write(
         format!("{archive_path}.sha256"),
@@ -342,7 +452,7 @@ fn checksum_sidecar_file_is_used_automatically() {
     )
     .unwrap();
 
-    let out = sb.run(&["--artifact-url", &url, "--dest", &dest_arg(&sb)]);
+    let out = sb.run(&["--artifact-url", &url, "--minisign-pubkey", &pk, "--dest", &dest_arg(&sb)]);
     assert_success(&out);
     assert!(sb.installed_binary().is_file());
     assert!(stderr(&out).contains("checksum verified"), "stderr: {}", stderr(&out));
@@ -351,8 +461,8 @@ fn checksum_sidecar_file_is_used_automatically() {
 #[test]
 fn install_is_idempotent() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
-    let args = ["--artifact-url", url.as_str(), "--checksum", &sha];
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
+    let args = ["--artifact-url", url.as_str(), "--checksum", &sha, "--minisign-pubkey", &pk];
     let dest = dest_arg(&sb);
 
     for _ in 0..2 {
@@ -367,7 +477,8 @@ fn install_is_idempotent() {
 #[test]
 fn archive_without_braid_binary_fails_cleanly() {
     let sb = Sandbox::new();
-    // An archive containing some other file, but no `braid`.
+    // An archive containing some other file, but no `braid`. Signed, so
+    // the failure exercised is extraction, not verification.
     let payload = sb.tmp.path().join("other-payload");
     fs::create_dir_all(&payload).unwrap();
     fs::write(payload.join("README"), "not a binary\n").unwrap();
@@ -384,10 +495,190 @@ fn archive_without_braid_binary_fails_cleanly() {
             .success()
     );
     let sha = format!("{:x}", Sha256::digest(fs::read(&archive).unwrap()));
+    let key = TestKey::generate(sb.tmp.path());
+    key.sign(&archive);
 
     let url = format!("file://{}", archive.display());
-    let out = sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)]);
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--minisign-pubkey",
+        &key.pub_key,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
     assert_failure(&out);
+    assert!(!sb.installed_binary().exists());
+}
+
+// --- signature verification ---------------------------------------------------
+
+#[test]
+fn missing_minisig_refuses_to_install() {
+    let sb = Sandbox::new();
+    let (url, sha) = make_artifact(sb.tmp.path()); // checksummed but unsigned
+    let key = TestKey::generate(sb.tmp.path());
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--minisign-pubkey",
+        &key.pub_key,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
+    assert_failure(&out);
+    assert!(
+        stderr(&out).contains("--insecure-skip-signature"),
+        "refusal should name the escape hatch\nstderr: {}",
+        stderr(&out)
+    );
+    assert!(!sb.installed_binary().exists());
+}
+
+#[test]
+fn insecure_skip_signature_installs_with_loud_warning() {
+    let sb = Sandbox::new();
+    let (url, sha) = make_artifact(sb.tmp.path()); // unsigned
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--insecure-skip-signature",
+        "--dest",
+        &dest_arg(&sb),
+    ]);
+    assert_success(&out);
+    assert!(sb.installed_binary().is_file());
+    assert!(
+        stderr(&out).to_lowercase().contains("unverified"),
+        "warning should say the signature went unverified\nstderr: {}",
+        stderr(&out)
+    );
+    // Checksum verification must still have happened.
+    assert!(stderr(&out).contains("checksum verified"), "stderr: {}", stderr(&out));
+}
+
+#[test]
+fn tampered_archive_fails_signature_and_installs_nothing() {
+    let sb = Sandbox::new();
+    let (url, _sha, pk) = make_signed_artifact(sb.tmp.path());
+    let archive = PathBuf::from(url.strip_prefix("file://").unwrap());
+
+    // Re-create the archive with different contents, keeping the old
+    // .minisig; hand the installer the *new* checksum so only the
+    // signature can catch the swap (the compromised-release scenario).
+    let payload = sb.tmp.path().join("evil-payload");
+    fs::create_dir_all(&payload).unwrap();
+    let bin = payload.join("braid");
+    fs::write(&bin, "#!/bin/sh\necho \"braid 6.6.6-evil\"\n").unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        Command::new("tar")
+            .args(["-czf"])
+            .arg(&archive)
+            .arg("-C")
+            .arg(&payload)
+            .arg("braid")
+            .status()
+            .unwrap()
+            .success()
+    );
+    let new_sha = format!("{:x}", Sha256::digest(fs::read(&archive).unwrap()));
+
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &new_sha,
+        "--minisign-pubkey",
+        &pk,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
+    assert_failure(&out);
+    assert!(!sb.installed_binary().exists());
+}
+
+#[test]
+fn wrong_public_key_fails() {
+    let sb = Sandbox::new();
+    let (url, sha, _pk) = make_signed_artifact(sb.tmp.path());
+    let other = TestKey::generate(&sb.tmp.path().join("other-key-dir"));
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--minisign-pubkey",
+        &other.pub_key,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
+    assert_failure(&out);
+    assert!(!sb.installed_binary().exists());
+}
+
+#[test]
+fn trusted_comment_mismatch_fails() {
+    let sb = Sandbox::new();
+    // Validly signed — but as a *different* artifact name. A signature
+    // replayed from another (e.g. older) release must not verify.
+    let (url, sha) = make_artifact(sb.tmp.path());
+    let archive = PathBuf::from(url.strip_prefix("file://").unwrap());
+    let key = TestKey::generate(sb.tmp.path());
+    key.sign_with_comment(&archive, "braid-0.0.0-other.tar.gz");
+
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--minisign-pubkey",
+        &key.pub_key,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
+    assert_failure(&out);
+    assert!(
+        stderr(&out).contains("trusted comment"),
+        "failure should explain the comment mismatch\nstderr: {}",
+        stderr(&out)
+    );
+    assert!(!sb.installed_binary().exists());
+}
+
+#[test]
+fn missing_minisign_tool_refuses_with_install_guidance() {
+    let sb = Sandbox::new();
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
+    // BRAID_MINISIGN points at a nonexistent binary: equivalent to a
+    // machine with no minisign, regardless of what /usr/bin holds.
+    let out = sb.run_env(
+        &[
+            "--artifact-url",
+            &url,
+            "--checksum",
+            &sha,
+            "--minisign-pubkey",
+            &pk,
+            "--dest",
+            &dest_arg(&sb),
+        ],
+        &[("BRAID_MINISIGN", "/nonexistent/minisign")],
+    );
+    assert_failure(&out);
+    let err = stderr(&out);
+    assert!(err.contains("minisign"), "should name the missing tool\nstderr: {err}");
+    assert!(err.contains("install"), "should give install guidance\nstderr: {err}");
+    assert!(
+        err.contains("--insecure-skip-signature"),
+        "should name the escape hatch\nstderr: {err}"
+    );
     assert!(!sb.installed_binary().exists());
 }
 
@@ -396,10 +687,10 @@ fn archive_without_braid_binary_fails_cleanly() {
 #[test]
 fn braid_install_dir_env_overrides_default_dest() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
     let env_dest = sb.tmp.path().join("env-bin");
     let out = sb.run_env(
-        &["--artifact-url", &url, "--checksum", &sha],
+        &["--artifact-url", &url, "--checksum", &sha, "--minisign-pubkey", &pk],
         &[("BRAID_INSTALL_DIR", &env_dest.display().to_string())],
     );
     assert_success(&out);
@@ -409,10 +700,19 @@ fn braid_install_dir_env_overrides_default_dest() {
 #[test]
 fn dest_flag_beats_braid_install_dir_env() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
     let env_dest = sb.tmp.path().join("env-bin");
     let out = sb.run_env(
-        &["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)],
+        &[
+            "--artifact-url",
+            &url,
+            "--checksum",
+            &sha,
+            "--minisign-pubkey",
+            &pk,
+            "--dest",
+            &dest_arg(&sb),
+        ],
         &[("BRAID_INSTALL_DIR", &env_dest.display().to_string())],
     );
     assert_success(&out);
@@ -425,8 +725,17 @@ fn dest_flag_beats_braid_install_dir_env() {
 #[test]
 fn warns_when_dest_is_not_on_path() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
-    let out = sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)]);
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
+    let out = sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--minisign-pubkey",
+        &pk,
+        "--dest",
+        &dest_arg(&sb),
+    ]);
     assert_success(&out);
     assert!(stderr(&out).contains("PATH"), "expected PATH advice\nstderr: {}", stderr(&out));
 }
@@ -434,10 +743,19 @@ fn warns_when_dest_is_not_on_path() {
 #[test]
 fn no_path_warning_when_dest_is_on_path() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
-    let path = format!("{}:{}", sb.dest().display(), SYSTEM_PATH);
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
+    let path = format!("{}:{}", sb.dest().display(), default_sandbox_path());
     let out = sb.run_env(
-        &["--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)],
+        &[
+            "--artifact-url",
+            &url,
+            "--checksum",
+            &sha,
+            "--minisign-pubkey",
+            &pk,
+            "--dest",
+            &dest_arg(&sb),
+        ],
         &[("PATH", &path)],
     );
     assert_success(&out);
@@ -449,11 +767,21 @@ fn no_path_warning_when_dest_is_on_path() {
 #[test]
 fn quiet_successful_install_prints_nothing() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
     // dest on PATH so there is no legitimate warning to print.
-    let path = format!("{}:{}", sb.dest().display(), SYSTEM_PATH);
+    let path = format!("{}:{}", sb.dest().display(), default_sandbox_path());
     let out = sb.run_env(
-        &["--quiet", "--artifact-url", &url, "--checksum", &sha, "--dest", &dest_arg(&sb)],
+        &[
+            "--quiet",
+            "--artifact-url",
+            &url,
+            "--checksum",
+            &sha,
+            "--minisign-pubkey",
+            &pk,
+            "--dest",
+            &dest_arg(&sb),
+        ],
         &[("PATH", &path)],
     );
     assert_success(&out);
@@ -485,9 +813,18 @@ fn quiet_still_reports_errors() {
 #[test]
 fn uninstall_removes_the_binary() {
     let sb = Sandbox::new();
-    let (url, sha) = make_artifact(sb.tmp.path());
+    let (url, sha, pk) = make_signed_artifact(sb.tmp.path());
     let dest = dest_arg(&sb);
-    assert_success(&sb.run(&["--artifact-url", &url, "--checksum", &sha, "--dest", &dest]));
+    assert_success(&sb.run(&[
+        "--artifact-url",
+        &url,
+        "--checksum",
+        &sha,
+        "--minisign-pubkey",
+        &pk,
+        "--dest",
+        &dest,
+    ]));
     assert!(sb.installed_binary().is_file());
 
     assert_success(&sb.run(&["--uninstall", "--dest", &dest]));

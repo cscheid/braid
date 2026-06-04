@@ -26,6 +26,15 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # The installer tests hard-require minisign (signature verification
+      # is part of the artifact contract; a skip would unguard it).
+      - name: Install minisign
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install minisign
+          else
+            sudo apt-get update && sudo apt-get install -y minisign
+          fi
       # This job is mirrored locally by `cargo xtask ci` (crates/xtask) —
       # keep the two in sync.
       - run: cargo fmt --all --check
@@ -51,7 +60,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # musl-tools for the build; minisign for the installer tests.
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools minisign
       - uses: Swatinem/rust-cache@v2
         with:
           key: musl
