@@ -32,10 +32,10 @@ fn subcommands() -> Vec<String> {
             if line.starts_with("Options:") || line.trim().is_empty() {
                 break;
             }
-            if let Some(name) = line.split_whitespace().next() {
-                if name != "help" {
-                    names.push(name.to_string());
-                }
+            if let Some(name) = line.split_whitespace().next()
+                && name != "help"
+            {
+                names.push(name.to_string());
             }
         }
     }
