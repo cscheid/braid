@@ -19,19 +19,41 @@ struct TestServer {
 
 impl TestServer {
     async fn start() -> TestServer {
+        Self::start_scheme("tcp").await
+    }
+
+    /// Like [`TestServer::start`] but speaking the websocket protocol,
+    /// exercising the same dial path used against wss:// sync servers in
+    /// production (minus TLS).
+    async fn start_ws() -> TestServer {
+        Self::start_scheme("ws").await
+    }
+
+    async fn start_scheme(scheme: &str) -> TestServer {
         let repo = samod::Repo::build_tokio()
             .with_storage(InMemoryStorage::new())
             .load()
             .await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let url = format!("tcp://{addr}");
+        let url = format!("{scheme}://{addr}");
         let acceptor = repo.make_acceptor(samod::Url::parse(&url).unwrap()).unwrap();
-        let accept_task = tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let _ = acceptor.accept_tokio_io(stream);
-            }
-        });
+        let accept_task = match scheme {
+            "tcp" => tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    let _ = acceptor.accept_tokio_io(stream);
+                }
+            }),
+            "ws" => tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
+                        continue;
+                    };
+                    let _ = acceptor.accept(braid::ws::ws_transport(ws));
+                }
+            }),
+            other => panic!("unsupported test server scheme {other:?}"),
+        };
         TestServer { url, repo, accept_task }
     }
 
@@ -116,6 +138,59 @@ async fn fresh_clone_fetches_skein_from_server() {
         .assert()
         .success()
         .stdout(predicate::str::contains("From machine A"));
+
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fresh_clone_fetches_skein_over_websocket() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start_ws().await;
+
+    let a = Clone_::new(tmp.path(), "a");
+    a.braid()
+        .args(["init", "--name", "synced", "--sync-server", &server.url])
+        .assert()
+        .success();
+    let doc_id = a.doc_id();
+    create_issue(&a, &["From machine A"]);
+
+    let b = Clone_::new(tmp.path(), "b");
+    b.write_secret(&doc_id, &server.url);
+    b.braid()
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("From machine A"));
+
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_clones_converge_over_websocket() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start_ws().await;
+
+    let a = Clone_::new(tmp.path(), "a");
+    a.braid()
+        .args(["init", "--name", "synced", "--sync-server", &server.url])
+        .assert()
+        .success();
+    let doc_id = a.doc_id();
+
+    let b = Clone_::new(tmp.path(), "b");
+    b.write_secret(&doc_id, &server.url);
+
+    create_issue(&a, &["issue from A"]);
+    create_issue(&b, &["issue from B"]);
+
+    for clone in [&a, &b] {
+        let issues = list_json(clone);
+        let titles: Vec<&str> =
+            issues.as_array().unwrap().iter().map(|i| i["title"].as_str().unwrap()).collect();
+        assert!(titles.contains(&"issue from A"), "missing A's issue: {titles:?}");
+        assert!(titles.contains(&"issue from B"), "missing B's issue: {titles:?}");
+    }
 
     server.stop().await;
 }

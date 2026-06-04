@@ -13,8 +13,24 @@ path = "src/main.rs"
 [dependencies]
 braid-core = { path = "../braid-core" }
 automerge = { workspace = true }
-samod = { workspace = true, features = ["tokio", "tungstenite"] }
+# No "tungstenite" feature: it hardcodes native-tls → OpenSSL on Linux,
+# breaking static musl release builds. src/ws.rs provides the websocket
+# dialer instead, over rustls (br-f3b18xoa).
+samod = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true }
+futures = { workspace = true }
+# "connect" + rustls for the dialer (src/ws.rs); "handshake" also covers
+# the accept side of the tests' in-process ws server. webpki roots are
+# compiled in so static binaries work without a system cert store.
+tokio-tungstenite = { workspace = true, features = [
+    "connect",
+    "handshake",
+    "rustls-tls-webpki-roots",
+] }
+# tungstenite leaves rustls's crypto-provider choice to us; ring (rather
+# than the default aws-lc-rs) cross-compiles cleanly to musl and builds
+# everywhere without cmake.
+rustls = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

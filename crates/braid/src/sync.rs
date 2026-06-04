@@ -10,10 +10,13 @@
 //! and say so on stderr. Only the explicit `braid sync` command treats
 //! offline as a failure.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
 use samod::{BackoffConfig, ConnectionId, DialerHandle, Repo, Url};
+
+use crate::ws::WsDialer;
 
 /// Sync timeout: `BRAID_SYNC_TIMEOUT` (seconds, fractional ok), default 5s.
 pub fn sync_timeout() -> Duration {
@@ -49,8 +52,11 @@ pub async fn connect(repo: &Repo, server_url: &str, timeout: Duration) -> Result
     };
 
     let dialer = match url.scheme() {
+        // Our own rustls-backed dialer, not samod's `dial_websocket`:
+        // samod's tungstenite feature hardcodes native-tls → OpenSSL on
+        // Linux, which breaks static musl release builds (br-f3b18xoa).
         "ws" | "wss" => repo
-            .dial_websocket(url, backoff)
+            .dial(backoff, Arc::new(WsDialer::new(url)))
             .map_err(|_| anyhow::anyhow!("samod repo stopped unexpectedly"))?,
         "tcp" => repo
             .dial_tcp(url, backoff)
