@@ -177,6 +177,8 @@ pub fn init_skein<T: Transactable>(
     put_str_if_changed(tx, &meta_obj, "name", &meta.name)?;
     put_str_if_changed(tx, &meta_obj, "id_prefix", &meta.id_prefix)?;
     put_str_if_changed(tx, &meta_obj, "created_at", &meta.created_at)?;
+    put_opt_str_if_changed(tx, &meta_obj, "rotated_at", meta.rotated_at.as_deref())?;
+    put_opt_str_if_changed(tx, &meta_obj, "rotated_to", meta.rotated_to.as_deref())?;
     ensure_obj(tx, &automerge::ROOT, "issues", ObjType::Map)?;
     Ok(())
 }
@@ -409,8 +411,9 @@ fn req_text<R: ReadDoc>(
 // hydrate
 // ---------------------------------------------------------------------------
 
-/// Read the whole document into hydrated form.
-pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<Skein, HydrateError> {
+/// Read only the metadata (cheap: used for the rotation check on every
+/// command without hydrating all strands).
+pub fn hydrate_metadata<R: ReadDoc>(doc: &R) -> Result<SkeinMetadata, HydrateError> {
     let Some((Value::Object(ObjType::Map), meta_obj)) = doc.get(automerge::ROOT, "metadata")?
     else {
         return Err(HydrateError::NotASkein("metadata"));
@@ -422,12 +425,19 @@ pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<Skein, HydrateError> {
             supported: SCHEMA_VERSION,
         });
     }
-    let metadata = SkeinMetadata {
+    Ok(SkeinMetadata {
         schema_version,
         name: req_str(doc, &meta_obj, "name", "metadata")?,
         id_prefix: req_str(doc, &meta_obj, "id_prefix", "metadata")?,
         created_at: req_str(doc, &meta_obj, "created_at", "metadata")?,
-    };
+        rotated_at: opt_str(doc, &meta_obj, "rotated_at", "metadata")?,
+        rotated_to: opt_str(doc, &meta_obj, "rotated_to", "metadata")?,
+    })
+}
+
+/// Read the whole document into hydrated form.
+pub fn hydrate<R: ReadDoc>(doc: &R) -> Result<Skein, HydrateError> {
+    let metadata = hydrate_metadata(doc)?;
 
     let Some((Value::Object(ObjType::Map), issues_obj)) = doc.get(automerge::ROOT, "issues")?
     else {

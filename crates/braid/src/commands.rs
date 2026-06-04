@@ -17,9 +17,9 @@ use braid_core::schema::{
 use braid_core::time::now_rfc3339;
 use samod::DocumentId;
 
-use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME};
+use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME, SecretSource};
 use crate::sync::{Connect, connect, sync_timeout};
-use crate::skein::{open_repo, open_skein};
+use crate::skein::{open_repo, open_skein, open_skein_unchecked};
 
 // ---------------------------------------------------------------------------
 // init
@@ -63,6 +63,8 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
                 name,
                 id_prefix: opts.prefix,
                 created_at: now_rfc3339(),
+        rotated_at: None,
+        rotated_to: None,
             };
             let mut doc = Automerge::new();
             doc.transact(|tx| init_skein(tx, &meta)).map_err(|f| f.error)?;
@@ -105,26 +107,12 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
         }
     };
 
-    let contents = format!(
-        "# braid skein secret — do NOT commit this file.\n\
-         # The doc_id is a bearer token: anyone holding it can read and write\n\
-         # this skein. Ensure `{REPO_FILE_NAME}` is listed in .gitignore.\n\
-         doc_id = \"{doc_id}\"\n\
-         sync_server = \"{sync_server}\"\n"
-    );
-
     if opts.print_only {
-        print!("{contents}");
+        print!("{}", secret_file_contents(&doc_id, &sync_server));
         return Ok(());
     }
 
-    std::fs::write(&secret_path, &contents)
-        .with_context(|| format!("cannot write {}", secret_path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&secret_path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    write_secret_file(&secret_path, &doc_id, &sync_server)?;
 
     // Print only a redacted prefix: full ids in stdout end up in CI logs
     // and agent transcripts, and the id is a bearer capability. `braid
@@ -155,6 +143,246 @@ pub fn secret(cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+/// The canonical `.braid.toml` contents.
+fn secret_file_contents(doc_id: &str, sync_server: &str) -> String {
+    format!(
+        "# braid skein secret — do NOT commit this file.\n\
+         # The doc_id is a bearer token: anyone holding it can read and write\n\
+         # this skein. Ensure `{REPO_FILE_NAME}` is listed in .gitignore.\n\
+         doc_id = \"{doc_id}\"\n\
+         sync_server = \"{sync_server}\"\n"
+    )
+}
+
+/// Write a `.braid.toml` (mode 600) — used by init, rotate, and adopt.
+fn write_secret_file(path: &Path, doc_id: &str, sync_server: &str) -> Result<()> {
+    let contents = secret_file_contents(doc_id, sync_server);
+    std::fs::write(path, &contents)
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// rotate / rotate --adopt
+// ---------------------------------------------------------------------------
+
+/// Point this clone's configuration at `new_doc_id`. Rewrites the
+/// `.braid.toml` that supplied the old id when possible; otherwise prints
+/// the paste-ready TOML (the operator needs the new secret, so this is a
+/// deliberate disclosure, flagged on stderr — same contract as
+/// `braid secret`).
+fn switch_config_to(source: &SecretSource, new_doc_id: &str, sync_server: &str) -> Result<()> {
+    match source {
+        SecretSource::RepoFile(path) => {
+            write_secret_file(path, new_doc_id, sync_server)?;
+            println!("updated {}", path.display());
+        }
+        other => {
+            let what = match other {
+                SecretSource::Env => "the BRAID_DOC_ID environment variable",
+                SecretSource::UserConfig { project } => {
+                    eprintln!(
+                        "braid: update [projects.{project}] in ~/.config/braid/projects.toml"
+                    );
+                    "your user-level config"
+                }
+                SecretSource::RepoFile(_) => unreachable!(),
+            };
+            eprintln!(
+                "braid: this clone's doc id comes from {what}, which braid cannot \
+                 rewrite. New secret follows on stdout — it grants read/write \
+                 access; share deliberately."
+            );
+            println!("doc_id = \"{new_doc_id}\"");
+            println!("sync_server = \"{sync_server}\"");
+        }
+    }
+    Ok(())
+}
+
+/// Rotate the skein: export current state into a fresh document, mark the
+/// old one rotated, and switch this clone over. Compact mode (default)
+/// records a forwarding pointer in the old document so stale clones can
+/// `--adopt`; `--revoke` deliberately does not (the old id is presumed
+/// leaked, and a pointer would hand the attacker the new capability).
+///
+/// See claude-notes/plans/2026/06/04/braid-rotate.md for the design.
+pub async fn rotate(cwd: &Path, revoke: bool) -> Result<()> {
+    // The rotation check in open_skein also protects us: rotating an
+    // already-rotated skein is refused there.
+    let opened = open_skein(cwd).await?;
+    if opened.conn.is_none() {
+        let reason = opened.offline_reason.clone().unwrap_or_default();
+        opened.close().await;
+        bail!(
+            "rotation requires a confirmed connection to the sync server \
+             ({reason}).\nA rotation cut over while offline would fork from \
+             stale state; retry when connected."
+        );
+    }
+    let conn = opened.conn.expect("checked above");
+    let old_state = opened.doc.with_document(|d| hydrate(d))?;
+    let strand_count = old_state.issues.len();
+    let now = now_rfc3339();
+
+    // 1. Build the successor document: same identity, fresh history.
+    let new_meta = SkeinMetadata {
+        schema_version: SCHEMA_VERSION,
+        name: old_state.metadata.name.clone(),
+        id_prefix: old_state.metadata.id_prefix.clone(),
+        created_at: now.clone(),
+        rotated_at: None,
+        rotated_to: None,
+    };
+    let mut new_doc = Automerge::new();
+    new_doc.transact(|tx| init_skein(tx, &new_meta)).map_err(|f| f.error)?;
+    for issue in old_state.issues.values() {
+        // per-issue transactions: reads inside one giant automerge
+        // transaction are superlinear (same lesson as import)
+        new_doc.transact(|tx| reconcile_issue(tx, issue)).map_err(|f| f.error)?;
+    }
+
+    // 2. Create it in the repo and wait until the server confirms receipt.
+    let new_handle = opened
+        .repo
+        .create(new_doc)
+        .await
+        .map_err(|_| anyhow!("samod repo stopped unexpectedly"))?;
+    let new_doc_id = new_handle.document_id().to_string();
+    let confirmed = tokio::time::timeout(sync_timeout(), new_handle.they_have_our_changes(conn))
+        .await
+        .is_ok();
+    if !confirmed {
+        opened.close().await;
+        bail!(
+            "the server did not confirm receipt of the new skein in time; \
+             rotation aborted — nothing was changed (an unused document may \
+             remain on the server)."
+        );
+    }
+
+    // 3. Mark the old document rotated. Compact mode records the successor
+    //    id; revoke mode must not.
+    let mut rotated_meta = old_state.metadata.clone();
+    rotated_meta.rotated_at = Some(now.clone());
+    rotated_meta.rotated_to = if revoke { None } else { Some(new_doc_id.clone()) };
+    opened
+        .doc
+        .with_document(|d| d.transact(|tx| init_skein(tx, &rotated_meta)).map_err(|f| f.error))?;
+    let marker_confirmed =
+        tokio::time::timeout(sync_timeout(), opened.doc.they_have_our_changes(conn))
+            .await
+            .is_ok();
+    if !marker_confirmed {
+        opened.close().await;
+        bail!(
+            "the new skein is on the server, but the rotation marker on the old \
+             skein was not confirmed; other clones may keep writing to the old \
+             document. Re-run `braid rotate` (this will create another fresh \
+             document) or retry when the connection is stable."
+        );
+    }
+
+    // 4. Cut this clone over.
+    switch_config_to(&opened.cfg.doc_id_source, &new_doc_id, &opened.cfg.sync_server)?;
+    let old_redacted = opened.cfg.doc_id.redacted();
+    let new_redacted = crate::docid::DocId::new(new_doc_id).redacted();
+    opened.close().await;
+
+    println!(
+        "rotated skein {old_redacted} -> {new_redacted} ({strand_count} strand{} carried over)",
+        if strand_count == 1 { "" } else { "s" }
+    );
+    if revoke {
+        println!(
+            "revoke mode: no forwarding pointer was written. Distribute the new \
+             secret out-of-band (`braid secret`) to every participant; stale \
+             clones will see a rotation error until they are reconfigured."
+        );
+    } else {
+        println!(
+            "stale clones will be prompted to run `braid rotate --adopt` on \
+             their next command."
+        );
+    }
+    println!(
+        "note: rotation does not erase the old document — anyone holding the \
+         old id retains read access to its (now frozen) history."
+    );
+    Ok(())
+}
+
+/// Follow a compact rotation's forwarding pointer: switch this clone's
+/// configuration to the successor document, surfacing any "straggler"
+/// strands that were written to the old skein after the rotation.
+pub async fn rotate_adopt(cwd: &Path) -> Result<()> {
+    let opened = open_skein_unchecked(cwd).await?;
+    let old_state = opened.doc.with_document(|d| hydrate(d))?;
+
+    let Some(rotated_at) = old_state.metadata.rotated_at.clone() else {
+        opened.close().await;
+        bail!("this skein has not been rotated; nothing to adopt");
+    };
+    let Some(new_doc_id) = old_state.metadata.rotated_to.clone() else {
+        opened.close().await;
+        bail!(
+            "this skein was rotated with --revoke: the successor id was \
+             deliberately not recorded. Obtain the new secret out-of-band \
+             (`braid secret` on an up-to-date machine)."
+        );
+    };
+
+    // Straggler detection (D-R6): strands modified after the rotation
+    // instant were written into the dead document. Unparseable timestamps
+    // are conservatively included.
+    let stragglers: Vec<&Issue> = old_state
+        .issues
+        .values()
+        .filter(|i| braid_core::time::is_after(&i.updated_at, &rotated_at).unwrap_or(true))
+        .collect();
+    if !stragglers.is_empty() {
+        let path = cwd.join(".braid-stragglers.jsonl");
+        let mut out = String::new();
+        for issue in &stragglers {
+            out.push_str(&serde_json::to_string(issue)?);
+            out.push('\n');
+        }
+        std::fs::write(&path, out)
+            .with_context(|| format!("cannot write {}", path.display()))?;
+        let ids: Vec<&str> = stragglers.iter().map(|i| i.id.as_str()).collect();
+        eprintln!(
+            "braid: {} straggler strand{} modified in the old skein after \
+             rotation: {}\nWritten to {} — review and `braid import` what \
+             should carry over (importing overwrites same-id strands in the \
+             new skein).",
+            stragglers.len(),
+            if stragglers.len() == 1 { "" } else { "s" },
+            ids.join(", "),
+            path.display()
+        );
+    }
+
+    switch_config_to(&opened.cfg.doc_id_source, &new_doc_id, &opened.cfg.sync_server)?;
+    opened.close().await;
+
+    // Verify the successor loads with the new configuration.
+    let adopted = open_skein(cwd).await?;
+    let skein = adopted.doc.with_document(|d| hydrate(d))?;
+    let n = skein.issues.len();
+    let redacted = adopted.cfg.doc_id.redacted();
+    adopted.close().await;
+    println!(
+        "adopted rotation: now on skein {redacted} ({n} strand{})",
+        if n == 1 { "" } else { "s" }
+    );
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // create
 // ---------------------------------------------------------------------------
@@ -172,7 +400,6 @@ pub struct CreateOpts {
 
 pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
 
     let mut id = new_issue_id(&skein.metadata.id_prefix, opts.slug.as_deref());
@@ -242,7 +469,6 @@ pub fn resolve_issue<'t>(skein: &'t Skein, query: &str) -> Result<&'t Issue> {
 
 pub async fn show(cwd: &Path, query: &str, json: bool) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
@@ -322,7 +548,6 @@ pub struct UpdateOpts {
 
 pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     let mut issue = resolve_issue(&skein, query)?.clone();
 
@@ -367,7 +592,6 @@ pub async fn update(cwd: &Path, query: &str, opts: UpdateOpts) -> Result<()> {
 
 pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force: bool) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
 
     // Resolve and validate everything before mutating anything.
@@ -421,7 +645,6 @@ pub async fn close(cwd: &Path, queries: &[String], reason: Option<String>, force
 
 pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
 
     let mut to_reopen: Vec<Issue> = queries
@@ -455,7 +678,6 @@ pub async fn reopen(cwd: &Path, queries: &[String]) -> Result<()> {
 
 pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     let mut issue = resolve_issue(&skein, query)?.clone();
 
@@ -488,7 +710,6 @@ pub async fn comment(cwd: &Path, query: &str, text: &str) -> Result<()> {
 
 pub async fn dep_add(cwd: &Path, from: &str, to: &str, dep_type: &str) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let mut skein = opened.doc.with_document(|d| hydrate(d))?;
 
     let mut issue = resolve_issue(&skein, from)?.clone();
@@ -527,7 +748,6 @@ pub async fn dep_add(cwd: &Path, from: &str, to: &str, dep_type: &str) -> Result
 
 pub async fn dep_remove(cwd: &Path, from: &str, to: &str, dep_type: Option<String>) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
 
     let mut issue = resolve_issue(&skein, from)?.clone();
@@ -554,7 +774,6 @@ pub async fn dep_remove(cwd: &Path, from: &str, to: &str, dep_type: Option<Strin
 
 pub async fn dep_list(cwd: &Path, query: &str) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
@@ -584,7 +803,6 @@ pub async fn dep_list(cwd: &Path, query: &str) -> Result<()> {
 
 pub async fn dep_cycles(cwd: &Path) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
@@ -642,7 +860,6 @@ fn print_listing(issues: &[&Issue]) {
 
 pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
@@ -657,7 +874,6 @@ pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
 
 pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
@@ -704,7 +920,6 @@ pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
     let issues = crate::import::parse_jsonl(&text)?;
 
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     // One transaction per issue: reads inside an automerge transaction
     // slow down as pending operations accumulate, so a single
     // 1000-issue transaction is severely superlinear. Per-issue
@@ -726,7 +941,6 @@ pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
 
 pub async fn export(cwd: &Path) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
@@ -763,7 +977,6 @@ fn issue_matches(issue: &Issue, needle_lower: &str) -> bool {
 
 pub async fn search(cwd: &Path, needle: &str, json: bool) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
@@ -803,7 +1016,6 @@ pub async fn sync(cwd: &Path) -> Result<()> {
         opened.close().await;
         bail!("offline: {reason}");
     }
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     let server = opened.cfg.sync_server.clone();
     opened.push_and_close().await;
@@ -817,7 +1029,6 @@ pub async fn sync(cwd: &Path) -> Result<()> {
 
 pub async fn list(cwd: &Path, status: Option<String>, json: bool) -> Result<()> {
     let opened = open_skein(cwd).await?;
-    opened.pull().await;
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 

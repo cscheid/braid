@@ -285,10 +285,10 @@ Cargo workspace:
 
 ## Risks / known tensions
 
-- **Single-doc growth**: automerge keeps full history; a busy tracker grows
-  without bound. Fine for O(10³) issues. Escape hatches if needed later:
-  doc rotation (export → fresh doc), or index-doc + per-issue docs. Schema
-  should not preclude this (hence self-contained issue objects).
+- ~~**Single-doc growth**~~: resolved 2026-06-04 by `braid rotate`
+  (see claude-notes/plans/2026/06/04/braid-rotate.md) — export → fresh
+  document, forwarding pointer for stale clones (omitted in `--revoke`
+  mode, which doubles as leaked-doc-id recovery).
 - **Public sync server**: `wss://sync.automerge.org` stores data unencrypted
   and the doc ID is the only credential (security-by-obscurity, per the
   ecosystem's own framing). Fine for default/demo; real use should point at

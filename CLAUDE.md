@@ -58,6 +58,13 @@ Complex plans can have phases, and work items are then split into multiple lists
 
 For simple tasks (single file changes, bug fixes), the TodoWrite tool is sufficient.
 
+## Git workflow
+
+Committing locally is always fine. **Do not run git commands that change
+the remote (`git push`, `git push --force`, branch deletion on origin,
+etc.) without asking Carlos first** — even when CI or other tooling would
+benefit from a push. Ask, then push.
+
 ## Development
 
 Always follow TDD workflow: write/update tests BEFORE implementing features. When creating plans, include test specifications as the first phase. Never skip to implementation without a test plan.

@@ -71,6 +71,9 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid dep cycles` | report dependency cycles |
 | `braid sync` | force a sync; fails when the server is unreachable |
 | `braid secret` | print the full doc id + sync server (paste-ready TOML). **Grants read/write access** — only run when a human asks |
+| `braid rotate` | move the skein to a fresh document (sheds history); stale clones are told to `--adopt`. **Only run when a human asks** |
+| `braid rotate --revoke` | rotation for a *leaked* doc id: no forwarding pointer is written; the new secret must be distributed out-of-band. **Only run when a human asks** |
+| `braid rotate --adopt` | follow a rotation: switch this clone to the successor skein (stragglers written to `.braid-stragglers.jsonl` for review) |
 | `braid import <file>` | import strands from JSONL (beads or braid format) |
 | `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |
@@ -101,6 +104,11 @@ Concurrent edits merge automatically: edits to different fields both
 survive; concurrent edits to the same prose field interleave
 character-wise; same scalar field, last writer wins; deleting a strand
 wins over concurrent edits to it.
+
+If a command fails with "this skein was rotated": the project moved to a
+successor document. Run `braid rotate --adopt` if the error suggests it;
+otherwise ask a human for the new secret. Do not try to work around the
+error — writes to a rotated skein are abandoned.
 
 ## Installing a braid skill ("tying the knot")
 

@@ -55,6 +55,8 @@ fn skein(issues: Vec<Issue>) -> Skein {
             name: "t".into(),
             id_prefix: "br".into(),
             created_at: "2026-06-03T10:00:00.000000Z".into(),
+            rotated_at: None,
+            rotated_to: None,
         },
         issues: issues.into_iter().map(|i| (i.id.clone(), i)).collect(),
     }

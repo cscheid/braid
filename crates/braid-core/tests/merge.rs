@@ -25,6 +25,8 @@ fn meta() -> SkeinMetadata {
         name: "merge-tests".into(),
         id_prefix: "br".into(),
         created_at: "2026-06-03T10:00:00.000000Z".into(),
+            rotated_at: None,
+            rotated_to: None,
     }
 }
 

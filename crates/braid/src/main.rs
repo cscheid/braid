@@ -145,6 +145,18 @@ enum Cmd {
     Import { path: std::path::PathBuf },
     /// Export all strands as JSONL to stdout
     Export,
+    /// Rotate the skein into a fresh document (sheds history; with
+    /// --revoke, recovers from a leaked doc id)
+    Rotate {
+        /// The old doc id is presumed leaked: write no forwarding pointer
+        /// into the old document; distribute the new secret out-of-band
+        #[arg(long, conflicts_with = "adopt")]
+        revoke: bool,
+        /// Follow a compact rotation's forwarding pointer: switch this
+        /// clone to the successor skein
+        #[arg(long)]
+        adopt: bool,
+    },
     /// Sync with the configured server (fails if unreachable)
     Sync,
 }
@@ -264,6 +276,13 @@ async fn main() {
             Ok(())
         }
         Cmd::Secret => commands::secret(&cwd),
+        Cmd::Rotate { revoke, adopt } => {
+            if adopt {
+                commands::rotate_adopt(&cwd).await
+            } else {
+                commands::rotate(&cwd, revoke).await
+            }
+        }
         Cmd::Import { path } => commands::import(&cwd, &path).await,
         Cmd::Export => commands::export(&cwd).await,
         Cmd::Sync => commands::sync(&cwd).await,

@@ -40,6 +40,16 @@ pub struct SkeinMetadata {
     pub id_prefix: String,
     /// RFC 3339; writer-set (see design decision D10).
     pub created_at: String,
+    /// When set, this skein has been rotated: a successor document holds
+    /// the live state and this one must no longer be written to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotated_at: Option<String>,
+    /// Successor document id, present only after a *compact* rotation
+    /// (`braid rotate`); a revocation rotation (`--revoke`) deliberately
+    /// omits it. **This value is a bearer capability** — code must never
+    /// print it; `braid rotate --adopt` moves it directly into config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotated_to: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

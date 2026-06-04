@@ -57,9 +57,35 @@ pub async fn open_repo() -> Result<Repo> {
 }
 
 /// Resolve config from `cwd`, dial the configured server (offline
-/// tolerated), and load the skein document — from the cache or, failing
-/// that, from the server.
+/// tolerated), load the skein document — from the cache or, failing that,
+/// from the server — pull the latest changes, and **refuse a rotated
+/// skein** (design D-R4: every command stops writing to a dead document).
 pub async fn open_skein(cwd: &Path) -> Result<OpenedSkein> {
+    let opened = open_skein_unchecked(cwd).await?;
+    let meta = opened.doc.with_document(|d| braid_core::amdoc::hydrate_metadata(d))?;
+    if let Some(rotated_at) = &meta.rotated_at {
+        if meta.rotated_to.is_some() {
+            bail!(
+                "this skein was rotated on {rotated_at}: a successor document \
+                 holds the live state.\nRun `braid rotate --adopt` to switch \
+                 this clone to the new skein."
+            );
+        } else {
+            bail!(
+                "this skein was rotated on {rotated_at} with revocation: the \
+                 successor id was deliberately not recorded here.\nObtain the \
+                 new secret out-of-band (`braid secret` on an up-to-date \
+                 machine) and update this clone's configuration."
+            );
+        }
+    }
+    Ok(opened)
+}
+
+/// [`open_skein`] without the rotation refusal (and pulls all the same).
+/// Used by `braid rotate --adopt`, which must open the *old* document to
+/// read its forwarding record.
+pub async fn open_skein_unchecked(cwd: &Path) -> Result<OpenedSkein> {
     let cfg = config::load(cwd)?;
     let doc_id: DocumentId = cfg.doc_id.expose_secret().parse().map_err(|e| {
         anyhow!(
@@ -80,7 +106,13 @@ pub async fn open_skein(cwd: &Path) -> Result<OpenedSkein> {
     // With an established connection, `find` asks the server for documents
     // missing from the cache.
     match repo.find(doc_id).await {
-        Ok(Some(doc)) => Ok(OpenedSkein { cfg, repo, doc, conn, offline_reason }),
+        Ok(Some(doc)) => {
+            let opened = OpenedSkein { cfg, repo, doc, conn, offline_reason };
+            // Every command wants the freshest state (and the rotation
+            // check must see the latest metadata), so pull here.
+            opened.pull().await;
+            Ok(opened)
+        }
         Ok(None) => {
             if conn.is_some() {
                 bail!(

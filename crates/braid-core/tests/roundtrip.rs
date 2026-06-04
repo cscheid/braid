@@ -17,7 +17,57 @@ fn meta() -> SkeinMetadata {
         name: "test-skein".into(),
         id_prefix: "br".into(),
         created_at: "2026-06-03T10:00:00.000000Z".into(),
+        rotated_at: None,
+        rotated_to: None,
     }
+}
+
+#[test]
+fn rotation_metadata_round_trips() {
+    let mut m = meta();
+    m.rotated_at = Some("2026-06-04T12:00:00.000000Z".into());
+    m.rotated_to = Some("4UfaPGzzySmw7Y1MR1VVXbfp4fgx".into());
+    let skein = Skein { metadata: m.clone(), issues: Default::default() };
+    let doc = materialize(&skein);
+    let back = hydrate(&doc).unwrap();
+    assert_eq!(back.metadata, m);
+
+    // revoke-style marker: rotated_at without rotated_to
+    let mut m2 = meta();
+    m2.rotated_at = Some("2026-06-04T12:00:00.000000Z".into());
+    let skein2 = Skein { metadata: m2.clone(), issues: Default::default() };
+    let back2 = hydrate(&materialize(&skein2)).unwrap();
+    assert_eq!(back2.metadata, m2);
+}
+
+#[test]
+fn marking_rotation_on_existing_doc_is_an_update_and_idempotent() {
+    let skein = skein_with(vec![minimal_issue("br-a")]);
+    let mut doc = materialize(&skein);
+
+    let mut rotated = skein.metadata.clone();
+    rotated.rotated_at = Some("2026-06-04T12:00:00.000000Z".into());
+    rotated.rotated_to = Some("4UfaPGzzySmw7Y1MR1VVXbfp4fgx".into());
+
+    doc.transact(|tx| init_skein(tx, &rotated)).map_err(|f| f.error).unwrap();
+    let back = hydrate(&doc).unwrap();
+    assert_eq!(back.metadata, rotated);
+    assert!(back.issues.contains_key("br-a"), "marking rotation must not touch strands");
+
+    // idempotent: re-asserting identical metadata creates no change
+    let heads = doc.get_heads();
+    doc.transact(|tx| init_skein(tx, &rotated)).map_err(|f| f.error).unwrap();
+    assert_eq!(doc.get_heads(), heads);
+}
+
+#[test]
+fn hydrate_metadata_reads_only_metadata() {
+    let mut m = meta();
+    m.rotated_at = Some("2026-06-04T12:00:00.000000Z".into());
+    let skein = Skein { metadata: m.clone(), issues: Default::default() };
+    let doc = materialize(&skein);
+    let got = braid_core::amdoc::hydrate_metadata(&doc).unwrap();
+    assert_eq!(got, m);
 }
 
 fn minimal_issue(id: &str) -> Issue {
