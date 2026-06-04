@@ -25,7 +25,7 @@ you're pushing.
 7. **Tag and push the tag**: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 8. **Watch the Release workflow** (`gh run watch`); then verify the release:
    `gh release view vX.Y.Z` must show 9 assets — 4 platform tarballs
-   (`braid-X.Y.Z-{darwin_arm64,darwin_x86_64,linux_arm64,linux_x86_64}.tar.gz`),
+   (`braid-X.Y.Z-{darwin,linux}_{arm64,amd64}.tar.gz`),
    their 4 `.sha256` files, and `checksums.sha256`.
 9. **Record it in the skein**: `BRAID_AUTHOR=claude braid comment` on a
    relevant strand, or a release note comment; `braid sync`.
