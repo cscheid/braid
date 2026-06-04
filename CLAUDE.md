@@ -83,6 +83,11 @@ benefit from a push. Ask, then push.
 
 Always follow TDD workflow: write/update tests BEFORE implementing features. When creating plans, include test specifications as the first phase. Never skip to implementation without a test plan.
 
+Run `cargo xtask ci` (fmt --check, clippy, build, full test suite — the
+same pipeline as CI) before asking Carlos to push. rustfmt is enforced;
+`cargo xtask fmt` applies it. Humans can opt into a pre-push hook with
+`cargo xtask install-hooks`.
+
 ## External sources
 
 You may make use of the `external-sources/` directory to store local copies of source code repositories that are useful to search locally.

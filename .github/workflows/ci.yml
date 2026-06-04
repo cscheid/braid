@@ -24,8 +24,11 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # This job is mirrored locally by `cargo xtask ci` (crates/xtask) —
+      # keep the two in sync.
+      - run: cargo fmt --all --check
       # Build everything first so `cargo test` never relinks the braid
       # binary while assert_cmd e2e tests are spawning it (see strand
       # br-cache-flake for the class of race this avoids). Tests need no

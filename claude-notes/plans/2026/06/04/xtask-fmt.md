@@ -71,11 +71,11 @@ and `--no-verify`-skippable); the optional pre-push hook is convenience.
 
 ### Phase 3 — CI gate
 
-- [ ] ci.yml: add rustfmt component + `cargo fmt --check` step to the
-      test job; cross-reference comments between ci.yml and xtask
+- [x] ci.yml: add rustfmt component + `cargo fmt --all --check` step to
+      the test job; cross-reference comments in both ci.yml and xtask
 
 ### Phase 4 — docs & wrap-up
 
-- [ ] CLAUDE.md: run `cargo xtask ci` before asking to push; mention
-      `cargo xtask install-hooks`
+- [x] CLAUDE.md: run `cargo xtask ci` before asking to push; mention
+      `cargo xtask fmt` and `cargo xtask install-hooks`
 - [ ] Comment + close strand br-xtask-fmt-jeuvc2d0 (after push)
