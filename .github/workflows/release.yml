@@ -1,0 +1,217 @@
+# Release pipeline: tag push (or manual dispatch on an existing tag) →
+# 4-target binary build → checksummed artifacts → GitHub Release.
+#
+# The artifact naming and checksum layout is a contract with install.sh
+# (and is what crates/braid/tests/installer.rs encodes):
+#
+#   braid-<version>-<platform>.tar.gz          single member: braid
+#   braid-<version>-<platform>.tar.gz.sha256   "<sha256>  <filename>"
+#   checksums.sha256                           all of the above, combined
+#
+# <version> has no "v" prefix in filenames; the tag does (v0.1.0 →
+# braid-0.1.0-darwin_arm64.tar.gz). Linux binaries are statically linked
+# musl, so one artifact per arch runs on every distro, Alpine included —
+# and the CI musl job has already gated the suite against that target.
+#
+# Plan: claude-notes/plans/2026/06/04/installer.md (strand br-iju0n3gd)
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re-)release, e.g. v0.1.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  preflight:
+    name: Verify tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # On workflow_dispatch the default ref is the branch; build
+          # from the requested tag so artifacts match what we verify.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - id: version
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          if [ "v$CARGO_VERSION" != "$TAG" ]; then
+            echo "::error::tag $TAG does not match workspace Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$CARGO_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $TAG (version $CARGO_VERSION)"
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux_amd64
+            target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - platform: linux_arm64
+            target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - platform: darwin_amd64
+            target: x86_64-apple-darwin
+            os: macos-15  # arm64 runner; the x86_64 binary runs under Rosetta
+          - platform: darwin_arm64
+            target: aarch64-apple-darwin
+            os: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install musl-tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ matrix.target }} -p braid
+
+      # Every target in the matrix can execute on its runner (musl
+      # binaries are static; darwin x86_64 runs under Rosetta), so the
+      # version check is unconditional.
+      - name: Verify binary reports the tag's version
+        run: |
+          RAW=$(./target/${{ matrix.target }}/release/braid --version)
+          ACTUAL="${RAW##* }"
+          if [ "$ACTUAL" != "${{ needs.preflight.outputs.version }}" ]; then
+            echo "::error::binary reports '$RAW', expected version ${{ needs.preflight.outputs.version }}"
+            exit 1
+          fi
+
+      - name: Package archive + checksum
+        run: |
+          ARCHIVE="braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz"
+          tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" braid
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+            sha256sum -c "$ARCHIVE.sha256"
+          else
+            shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+            shasum -a 256 -c "$ARCHIVE.sha256"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: braid-${{ matrix.platform }}
+          path: |
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0  # changelog needs the previous tag
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Validate all platforms present, combine and verify checksums
+        run: |
+          cd artifacts
+          VERSION="${{ needs.preflight.outputs.version }}"
+          MISSING=()
+          for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            [ -f "braid-${VERSION}-${platform}.tar.gz" ] || MISSING+=("$platform")
+          done
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::missing platform artifacts: ${MISSING[*]}"
+            exit 1
+          fi
+          cat -- *.sha256 | sort -k2 > checksums.sha256
+          sha256sum -c checksums.sha256
+          cat checksums.sha256
+
+      - name: Generate release notes
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          {
+            echo "## Install"
+            echo
+            echo '```sh'
+            echo "curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash"
+            echo '```'
+            echo
+            echo "Or with cargo: \`cargo install --git https://github.com/${GITHUB_REPOSITORY} --tag ${TAG} braid\`"
+            echo
+            echo "| Platform | File |"
+            echo "|---|---|"
+            echo "| Linux x86_64 (static musl) | \`braid-${VERSION}-linux_amd64.tar.gz\` |"
+            echo "| Linux ARM64 (static musl) | \`braid-${VERSION}-linux_arm64.tar.gz\` |"
+            echo "| macOS Intel | \`braid-${VERSION}-darwin_amd64.tar.gz\` |"
+            echo "| macOS Apple Silicon | \`braid-${VERSION}-darwin_arm64.tar.gz\` |"
+            echo
+            echo "Verify a manual download: \`sha256sum -c checksums.sha256 --ignore-missing\`"
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$PREV_TAG" ]; then
+              git log --pretty='- %s (%h)' "${PREV_TAG}..${TAG}"
+            else
+              git log --pretty='- %s (%h)' "$TAG"
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          PRERELEASE=()
+          case "$TAG" in *-*) PRERELEASE=(--prerelease) ;; esac
+          gh release create "$TAG" \
+            --title "braid $TAG" \
+            --notes-file notes.md \
+            --verify-tag \
+            "${PRERELEASE[@]}" \
+            artifacts/braid-*.tar.gz artifacts/braid-*.tar.gz.sha256 artifacts/checksums.sha256

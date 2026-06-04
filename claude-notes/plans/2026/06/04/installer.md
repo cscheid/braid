@@ -287,14 +287,23 @@ diverges from beads_rust).
 
 ### Phase 3: release workflow
 
-- [ ] `.github/workflows/release.yml`: preflight tag-vs-Cargo.toml
-      check → 4-target build matrix (run `cargo test` for runnable
-      targets; binary `--version`-vs-tag check) → archive as
+- [x] `.github/workflows/release.yml`: preflight tag-vs-Cargo.toml
+      check → 4-target build matrix → binary `--version`-vs-tag check
+      (every target executes on its runner: musl is static, darwin
+      x86_64 runs under Rosetta) → archive as
       `braid-<ver>-<platform>.tar.gz` → per-artifact `.sha256` +
-      combined `checksums.sha256` → create GitHub Release with
-      generated notes
-- [ ] Workflow-lint it (actionlint if available)
-- [ ] Tag `v0.1.0` (or bump first), confirm artifacts + checksums appear
+      combined, verified `checksums.sha256` → GitHub Release via `gh
+      release create` with generated notes. Full `cargo test` in the
+      release matrix was dropped as redundant: CI (incl. the musl job)
+      already gates every commit on main; the release jobs verify the
+      built artifact itself.
+- [x] Workflow-lint: actionlint clean (installed via brew; it also
+      shellchecks the embedded run blocks)
+- [x] `--locked` release build verified locally; version-string parsing
+      (`braid 0.1.0` → `0.1.0`) confirmed against the real binary
+- [x] `[profile.release] strip = true` — shipped binary 8.5M → 7.0M
+- [ ] Tag `v0.1.0`, confirm artifacts + checksums appear (needs push
+      approval)
 
 ### Phase 4: end-to-end validation + docs
 

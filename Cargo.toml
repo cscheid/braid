@@ -13,6 +13,12 @@ repository = "https://github.com/cscheid/braid"
 [profile.dev.package.automerge]
 opt-level = 3
 
+# Release binaries are shipped via install.sh; strip symbols to keep the
+# download small (backtraces still resolve to function names via panic
+# messages, and debug builds remain fully symbolicated).
+[profile.release]
+strip = true
+
 [workspace.dependencies]
 automerge = "0.9.0"
 samod = "0.10.0"
