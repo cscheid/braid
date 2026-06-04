@@ -103,6 +103,27 @@ pub struct Imported {
     pub imported: usize,
 }
 
+/// Skein metadata safe for any consumer: excludes the rotation fields
+/// (`rotated_to` is a bearer capability).
+#[derive(Debug, Serialize)]
+pub struct PublicMetadata {
+    pub name: String,
+    pub id_prefix: String,
+    pub created_at: String,
+}
+
+/// Connection/convergence status for the skein resource (plan Q6: the
+/// status surface lives on `braid://skein`, not in a sync tool).
+#[derive(Debug, Serialize)]
+pub struct SyncState {
+    pub online: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offline_reason: Option<String>,
+    /// Whether the server has acknowledged everything local; `null` when
+    /// offline (unknowable).
+    pub in_sync: Option<bool>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Deferred {
     pub deferred: Vec<Issue>,
@@ -233,6 +254,53 @@ impl Session {
     /// already push individually).
     pub async fn push(&self) -> PushOutcome {
         self.opened.push().await
+    }
+
+    /// Skein metadata (rotation-checked like every read; the rotation
+    /// fields and especially `rotated_to` are deliberately not returned).
+    pub fn metadata(&self) -> Result<PublicMetadata> {
+        self.guard_rotation()?;
+        let meta = self.opened.doc.with_document(|d| hydrate_metadata(d))?;
+        Ok(PublicMetadata {
+            name: meta.name,
+            id_prefix: meta.id_prefix,
+            created_at: meta.created_at,
+        })
+    }
+
+    /// Non-blocking connection/convergence snapshot.
+    pub fn sync_state(&self) -> SyncState {
+        let in_sync = self.opened.conn.map(|conn| {
+            let local = self.opened.doc.with_document(|d| d.get_heads());
+            let (peers, _changes) = self.opened.doc.peers();
+            peers.get(&conn).map(|s| s.shared_heads.as_ref() == Some(&local)).unwrap_or(false)
+        });
+        SyncState {
+            online: self.opened.conn.is_some(),
+            offline_reason: self.opened.offline_reason.clone(),
+            in_sync,
+        }
+    }
+
+    /// A stream yielding once per document change (local or remote) —
+    /// the MCP server's notification source. samod types stay internal.
+    ///
+    /// samod's `changes()` borrows its handle, so a forwarding task owns a
+    /// cloned `DocHandle` and feeds an owned channel; the task ends when
+    /// either side drops.
+    pub fn changes_stream(&self) -> impl futures::Stream<Item = ()> + Send + 'static {
+        use futures::StreamExt;
+        let doc = self.opened.doc.clone();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        tokio::spawn(async move {
+            let mut changes = std::pin::pin!(doc.changes());
+            while changes.next().await.is_some() {
+                if tx.send(()).is_err() {
+                    break; // receiver gone
+                }
+            }
+        });
+        futures::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|item| (item, rx)) })
     }
 
     /// Shut the session down, flushing the cache.

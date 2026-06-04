@@ -21,8 +21,9 @@
 //!
 //! stdout is the protocol channel; all diagnostics go to stderr.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use braid_core::domain::ListFilter;
@@ -30,8 +31,11 @@ use braid_core::schema::IssueType;
 use rmcp::ServiceExt;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, Content, ErrorData, Implementation, InitializeResult,
-    ListToolsResult, PaginatedRequestParams, ServerCapabilities, Tool, ToolAnnotations,
+    AnnotateAble, CallToolRequestParams, CallToolResult, Content, ErrorData, Implementation,
+    InitializeResult, ListResourceTemplatesResult, ListResourcesResult, ListToolsResult,
+    PaginatedRequestParams, RawResource, RawResourceTemplate, ReadResourceRequestParams,
+    ReadResourceResult, ResourceContents, ResourceUpdatedNotificationParam, ServerCapabilities,
+    SubscribeRequestParams, Tool, ToolAnnotations, UnsubscribeRequestParams,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use serde::Deserialize;
@@ -456,6 +460,8 @@ pub struct BraidServer {
     session: Session,
     read_only: bool,
     enable_destructive: bool,
+    /// URIs with active subscriptions; shared with the notifier task.
+    subscriptions: Arc<Mutex<HashSet<String>>>,
 }
 
 impl BraidServer {
@@ -726,19 +732,65 @@ fn default_dep_type() -> String {
     "blocks".to_string()
 }
 
+impl BraidServer {
+    /// Resolve a `braid://` URI to its JSON body. The skein resource is
+    /// the status surface (plan Q6): connection state and convergence,
+    /// counts — and never the doc id.
+    fn read_resource_json(&self, uri: &str) -> anyhow::Result<Value> {
+        match uri {
+            "braid://skein" => {
+                let all = self.session.list(None, true, &ListFilter::default())?;
+                let mut by_status = std::collections::BTreeMap::<String, usize>::new();
+                for issue in &all {
+                    *by_status.entry(issue.status.as_str().to_string()).or_default() += 1;
+                }
+                let ready = self.session.ready(&ListFilter::default())?;
+                Ok(json!({
+                    "counts": {"total": all.len(), "by_status": by_status, "ready": ready.len()},
+                    "connection": self.session.sync_state(),
+                    "author": self.session.author(),
+                }))
+                .map(|mut v: Value| {
+                    // name/prefix from metadata via a strand-free path
+                    if let Ok(meta) = self.session.metadata() {
+                        v["name"] = json!(meta.name);
+                        v["id_prefix"] = json!(meta.id_prefix);
+                        v["created_at"] = json!(meta.created_at);
+                    }
+                    v
+                })
+            }
+            "braid://ready" => {
+                let strands = self.session.ready(&ListFilter::default())?;
+                Ok(json!({"strands": strands, "count": strands.len()}))
+            }
+            _ => match uri.strip_prefix("braid://strand/") {
+                Some(id) if !id.is_empty() => Ok(serde_json::to_value(self.session.show(id)?)?),
+                _ => anyhow::bail!("unknown resource {uri}"),
+            },
+        }
+    }
+}
+
 impl ServerHandler for BraidServer {
     fn get_info(&self) -> InitializeResult {
-        InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(
-                Implementation::new("braid", env!("CARGO_PKG_VERSION"))
-                    .with_title("braid issue tracking"),
-            )
-            .with_instructions(
-                "braid tracks work in a skein (a CRDT-synced collection of issue \
+        InitializeResult::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .enable_resources_subscribe()
+                .build(),
+        )
+        .with_server_info(
+            Implementation::new("braid", env!("CARGO_PKG_VERSION"))
+                .with_title("braid issue tracking"),
+        )
+        .with_instructions(
+            "braid tracks work in a skein (a CRDT-synced collection of issue \
                  strands). Start with braid_ready to find workable strands; \
                  braid_create files new work; braid_close completes it. Mutation \
                  results carry a `sync` field reporting server acknowledgement.",
-            )
+        )
     }
 
     async fn list_tools(
@@ -748,6 +800,80 @@ impl ServerHandler for BraidServer {
     ) -> Result<ListToolsResult, ErrorData> {
         let tools = specs().iter().filter(|s| self.visible(s.tier)).map(to_tool).collect();
         Ok(ListToolsResult { tools, next_cursor: None, meta: None })
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let mut skein = RawResource::new("braid://skein", "skein");
+        skein.title = Some("Skein status".into());
+        skein.description = Some(
+            "Name, strand counts, connection state, and convergence — never the doc id.".into(),
+        );
+        skein.mime_type = Some("application/json".into());
+        let mut ready = RawResource::new("braid://ready", "ready");
+        ready.title = Some("Ready strands".into());
+        ready.description =
+            Some("Strands ready to work on; subscribe to hear when the queue changes.".into());
+        ready.mime_type = Some("application/json".into());
+        Ok(ListResourcesResult {
+            resources: vec![skein.no_annotation(), ready.no_annotation()],
+            next_cursor: None,
+            meta: None,
+        })
+    }
+
+    async fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+        let mut strand = RawResourceTemplate::new("braid://strand/{id}", "strand");
+        strand.description = Some(
+            "One strand by id (unique id fragments work), as a schema-conformant record.".into(),
+        );
+        strand.mime_type = Some("application/json".into());
+        Ok(ListResourceTemplatesResult {
+            resource_templates: vec![strand.no_annotation()],
+            next_cursor: None,
+            meta: None,
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, ErrorData> {
+        let uri = request.uri.as_str();
+        let body = self
+            .read_resource_json(uri)
+            .map_err(|e| ErrorData::resource_not_found(format!("{e:#}"), None))?;
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(body.to_string(), uri)]))
+    }
+
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        let uri = request.uri;
+        if !uri.starts_with("braid://") {
+            return Err(ErrorData::resource_not_found(format!("unknown resource {uri}"), None));
+        }
+        self.subscriptions.lock().unwrap().insert(uri);
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.subscriptions.lock().unwrap().remove(&request.uri);
+        Ok(())
     }
 
     async fn call_tool(
@@ -798,15 +924,43 @@ pub async fn serve(opts: McpOpts) -> Result<()> {
         if opts.enable_destructive { ", destructive tools enabled" } else { "" },
     );
 
+    let changes = session.changes_stream();
+    let subscriptions: Arc<Mutex<HashSet<String>>> = Arc::default();
+
     let server = BraidServer {
         session,
         read_only: opts.read_only,
         enable_destructive: opts.enable_destructive,
+        subscriptions: subscriptions.clone(),
     };
     let service = server
         .serve(rmcp::transport::io::stdio())
         .await
         .map_err(|e| anyhow::anyhow!("mcp transport failed to start: {e}"))?;
+
+    // Notifier: every document change (local or remote) marks all
+    // subscribed resources updated. Bursts are coalesced: sync applies
+    // changes in volleys, and consumers re-read on notification anyway,
+    // so one notification per volley is the honest granularity.
+    let peer = service.peer().clone();
+    let notifier = tokio::spawn(async move {
+        use futures::StreamExt;
+        let mut changes = std::pin::pin!(changes);
+        while changes.next().await.is_some() {
+            // drain the rest of the volley
+            while let Ok(Some(_)) =
+                tokio::time::timeout(std::time::Duration::from_millis(150), changes.next()).await
+            {
+            }
+            let uris: Vec<String> = subscriptions.lock().unwrap().iter().cloned().collect();
+            for uri in uris {
+                let _ =
+                    peer.notify_resource_updated(ResourceUpdatedNotificationParam { uri }).await;
+            }
+        }
+    });
+
     service.waiting().await?;
+    notifier.abort();
     Ok(())
 }

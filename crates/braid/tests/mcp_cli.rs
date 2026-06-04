@@ -52,6 +52,8 @@ struct McpClient {
     next_id: i64,
     /// every protocol byte the server sent us (for hygiene assertions)
     transcript: String,
+    /// the initialize result (capabilities etc.)
+    init_result: Value,
 }
 
 impl McpClient {
@@ -72,8 +74,14 @@ impl McpClient {
             .expect("spawn braid mcp");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
-        let mut client =
-            McpClient { _child: child, stdin, stdout, next_id: 0, transcript: String::new() };
+        let mut client = McpClient {
+            _child: child,
+            stdin,
+            stdout,
+            next_id: 0,
+            transcript: String::new(),
+            init_result: Value::Null,
+        };
         client.initialize().await;
         client
     }
@@ -118,7 +126,40 @@ impl McpClient {
             )
             .await;
         assert!(resp.get("result").is_some(), "initialize failed: {resp}");
+        self.init_result = resp["result"].clone();
         self.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
+    }
+
+    /// Read a resource, expecting success; returns the parsed JSON text body.
+    async fn read_resource(&mut self, uri: &str) -> Value {
+        let resp = self.request("resources/read", json!({"uri": uri})).await;
+        let text = resp["result"]["contents"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("resource {uri} has no text: {resp}"));
+        serde_json::from_str(text).expect("resource body is JSON")
+    }
+
+    /// Wait (bounded) for a notification with the given method; returns
+    /// its params. Lines for other messages keep accumulating in the
+    /// transcript.
+    async fn wait_for_notification(&mut self, method: &str, secs: u64) -> Option<Value> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        loop {
+            let remaining = deadline.checked_duration_since(std::time::Instant::now())?;
+            let mut line = String::new();
+            let n = tokio::time::timeout(remaining, self.stdout.read_line(&mut line))
+                .await
+                .ok()?
+                .ok()?;
+            if n == 0 {
+                return None;
+            }
+            self.transcript.push_str(&line);
+            let v: Value = serde_json::from_str(line.trim()).ok()?;
+            if v.get("method").and_then(|m| m.as_str()) == Some(method) {
+                return Some(v["params"].clone());
+            }
+        }
     }
 
     async fn tools(&mut self) -> Vec<Value> {
@@ -398,6 +439,11 @@ async fn doc_id_never_crosses_the_wire() {
     client.call("braid_export", json!({})).await;
     client.call_expect_error("braid_show", json!({"id": "zzz-nope"})).await;
     client.tools().await;
+    // resources are part of the wire surface too
+    client.request("resources/list", json!({})).await;
+    client.read_resource("braid://skein").await;
+    client.read_resource("braid://ready").await;
+    client.request("resources/read", json!({"uri": "braid://nonsense"})).await;
 
     assert!(
         !client.transcript.contains(&doc_id),
@@ -462,6 +508,123 @@ async fn long_lived_session_notices_rotation() {
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
     assert!(saw_rotation, "running MCP server must notice the rotation");
+
+    accept_task.abort();
+    relay.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn resources_list_read_and_capabilities() {
+    let tmp = tempfile::tempdir().unwrap();
+    let skein = Skein::new(tmp.path(), "a");
+    skein.init(DEAD_SERVER);
+
+    let mut client = McpClient::spawn(&skein, &[]).await;
+
+    // capabilities advertise subscribable resources
+    assert_eq!(client.init_result["capabilities"]["resources"]["subscribe"], json!(true));
+
+    // fixed resources + the strand template
+    let resp = client.request("resources/list", json!({})).await;
+    let mut uris: Vec<String> = resp["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap().to_string())
+        .collect();
+    uris.sort();
+    assert_eq!(uris, ["braid://ready", "braid://skein"]);
+
+    let resp = client.request("resources/templates/list", json!({})).await;
+    let templates: Vec<&str> = resp["result"]["resourceTemplates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["uriTemplate"].as_str().unwrap())
+        .collect();
+    assert_eq!(templates, ["braid://strand/{id}"]);
+
+    // braid://skein: status surface (Q6) — name, counts, connection; the
+    // dead server means offline and in_sync unknown
+    let status = client.read_resource("braid://skein").await;
+    assert_eq!(status["name"], "mcp-test");
+    assert_eq!(status["connection"]["online"], json!(false));
+    assert_eq!(status["counts"]["total"], json!(0));
+
+    // braid://ready and braid://strand/{id}
+    let created = client.call("braid_create", json!({"title": "via tool"})).await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let ready = client.read_resource("braid://ready").await;
+    assert_eq!(ready["count"], json!(1));
+    let strand = client.read_resource(&format!("braid://strand/{id}")).await;
+    assert_eq!(strand["title"], "via tool");
+
+    // unknown resources error cleanly
+    let resp = client.request("resources/read", json!({"uri": "braid://strand/zzz-nope"})).await;
+    assert!(resp.get("error").is_some(), "{resp}");
+    let resp = client.request("resources/read", json!({"uri": "braid://nonsense"})).await;
+    assert!(resp.get("error").is_some(), "{resp}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn subscribed_resources_notify_on_remote_changes() {
+    // The liveness payoff: a CLI write from another clone, through a live
+    // relay, produces notifications/resources/updated on a subscribed
+    // resource of a running MCP server.
+    let tmp = tempfile::tempdir().unwrap();
+
+    let relay = samod::Repo::build_tokio()
+        .with_storage(samod::storage::InMemoryStorage::new())
+        .load()
+        .await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("tcp://{}", listener.local_addr().unwrap());
+    let acceptor = relay.make_acceptor(samod::Url::parse(&url).unwrap()).unwrap();
+    let accept_task = tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let _ = acceptor.accept_tokio_io(stream);
+        }
+    });
+
+    let a = Skein::new(tmp.path(), "a");
+    let doc_id = a.init(&url);
+
+    let mut client = McpClient::spawn(&a, &[]).await;
+    let resp = client.request("resources/subscribe", json!({"uri": "braid://ready"})).await;
+    assert!(resp.get("error").is_none(), "subscribe failed: {resp}");
+
+    // online skein resource reports the connection
+    let status = client.read_resource("braid://skein").await;
+    assert_eq!(status["connection"]["online"], json!(true));
+
+    // another clone writes through the relay
+    let b = Skein::new(tmp.path(), "b");
+    std::fs::write(
+        b.work.join(".braid.toml"),
+        format!("doc_id = \"{doc_id}\"\nsync_server = \"{url}\"\n"),
+    )
+    .unwrap();
+    let mut c = assert_cmd::Command::cargo_bin("braid").unwrap();
+    c.current_dir(&b.work)
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap())
+        .env("HOME", &b.home)
+        .env("BRAID_SYNC_TIMEOUT", "10")
+        .args(["create", "created remotely"])
+        .assert()
+        .success();
+
+    let params = client
+        .wait_for_notification("notifications/resources/updated", 20)
+        .await
+        .expect("server must push resources/updated after a remote change");
+    assert_eq!(params["uri"], "braid://ready");
+
+    // and the resource now reflects the remote write
+    let ready = client.read_resource("braid://ready").await;
+    let titles: Vec<&str> =
+        ready["strands"].as_array().unwrap().iter().map(|s| s["title"].as_str().unwrap()).collect();
+    assert!(titles.contains(&"created remotely"), "{titles:?}");
 
     accept_task.abort();
     relay.stop().await;

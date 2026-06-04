@@ -2,7 +2,7 @@
 
 **Strand:** br-s4ikmzr7 (P4; design analysis in its `design` field)
 **Date:** 2026-06-04
-**Status:** plan for review — no implementation yet
+**Status:** complete (2026-06-04, phases 0–3)
 
 ## Overview
 
@@ -230,11 +230,15 @@ beyond what `.braid.toml` already holds.
       deliberately serves a reduced surface)
 
 ### Phase 3 — resources & notifications
-- [ ] `braid://ready`, `braid://strand/{id}`, `braid://skein` resources
-      (skein resource carries connection state + unconfirmed-changes
-      count — the Q6 status surface; never the doc id)
-- [ ] changes() → resources/updated notifications; liveness e2e
-- [ ] revisit strand priority/close
+- [x] `braid://ready`, `braid://strand/{id}`, `braid://skein` resources
+      (skein resource carries connection state + in_sync convergence —
+      the Q6 status surface; PublicMetadata excludes rotation fields so
+      `rotated_to` can never leak; hygiene e2e covers resource bodies)
+- [x] changes() → resources/updated notifications (forwarding task owns a
+      cloned DocHandle; bursts coalesced at 150ms); liveness e2e: a CLI
+      write from another clone through a live relay pushes
+      notifications/resources/updated to the subscribed running server
+- [x] strand closed (all phases complete)
 
 ## Out of scope (recorded, not planned)
 

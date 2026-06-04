@@ -34,7 +34,7 @@ Useful flags (pass after `bash -s --`):
 
 ```sh
 # specific version, custom directory
-curl -fsSL .../install.sh | bash -s -- --version v0.1.0 --dest ~/bin
+curl -fsSL .../install.sh | bash -s -- --version v0.2.0 --dest ~/bin
 
 # build from source instead (needs a Rust toolchain)
 curl -fsSL .../install.sh | bash -s -- --from-source
