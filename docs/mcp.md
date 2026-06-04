@@ -73,6 +73,23 @@ Every tool carries honest MCP annotations (`readOnlyHint`,
 build confirmation UX; annotations are hints, the launch flags are the
 enforcement.
 
+## Resources and notifications
+
+Three subscribable resources (all `application/json`, none ever carrying
+the doc id):
+
+| uri | contents |
+|---|---|
+| `braid://skein` | name, strand counts (total / by status / ready), **connection state and convergence** (`online`, `in_sync`), author — the status surface; there is deliberately no sync tool |
+| `braid://ready` | the ready queue (`{strands, count}`) |
+| `braid://strand/{id}` | one strand as a schema-conformant record (unique id fragments work) |
+
+`resources/subscribe` to any `braid://` URI; on every document change
+(local or remote — bursts coalesced), the server pushes
+`notifications/resources/updated` for each subscription. "Tell me when my
+blocker closes" = subscribe to `braid://ready` (or the blocker's strand
+URI) and re-read on notification.
+
 ## Semantics worth knowing
 
 - Tool outputs are `structuredContent`; strand records conform to
