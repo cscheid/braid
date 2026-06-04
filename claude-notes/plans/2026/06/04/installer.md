@@ -233,38 +233,57 @@ Tracked as its own strand (discovered-from `br-iju0n3gd`).
 
 ### Phase 1: test specifications (TDD — before install.sh exists)
 
-- [ ] Add `crates/braid/tests/e2e_installer.rs` modeled on beads_rust's,
-      offline-first via `--artifact-url file://...` + `--checksum`:
-  - [ ] platform detection: maps `uname` combos to the 4 platform strings,
-        dies on unsupported OS/arch
-  - [ ] `--help` lists every supported flag; unknown flags are ignored
-        or rejected (pick one; test it)
-  - [ ] successful install from a local artifact: binary lands in
-        `--dest`, is executable, dest dir is created if missing
-  - [ ] checksum mismatch → nonzero exit, nothing installed, no partial
-        files left in dest
-  - [ ] missing checksum + no `--insecure-skip-checksum` → refuses
-  - [ ] missing checksum + `--insecure-skip-checksum` → proceeds with
-        loud warning
-  - [ ] idempotency: running twice succeeds, binary still works
-  - [ ] `--uninstall` removes the binary
-  - [ ] PATH warning printed when dest not on PATH; absent when it is
-  - [ ] `--quiet` suppresses non-error output
-  - [ ] shellcheck clean (test shells out to shellcheck if available,
-        skips otherwise)
-- [ ] Network-dependent tests (self-skipping offline, like theirs):
-      version resolution against the real GitHub API once a release exists
+- [x] Add `crates/braid/tests/installer.rs` (26 tests) modeled on
+      beads_rust's, offline-first via `--artifact-url file://...` +
+      `--checksum`, `uname` faked through a PATH shim:
+  - [x] platform detection: maps `uname` combos to the 4 platform strings,
+        dies on unsupported OS/arch pointing at `cargo install`
+  - [x] `--help` lists every supported flag; unknown flags are
+        **rejected** (a typo silently ignored is how a `--checksun`
+        install ends up unverified)
+  - [x] successful install from a local artifact: binary lands in
+        `--dest`, is executable, dest dir is created if missing; stdout
+        stays empty (progress is stderr-only)
+  - [x] checksum mismatch → nonzero exit, nothing installed, no partial
+        files left in dest; malformed checksum rejected
+  - [x] missing checksum + no `--insecure-skip-checksum` → refuses,
+        naming the escape hatch
+  - [x] missing checksum + `--insecure-skip-checksum` → proceeds with
+        loud UNVERIFIED warning
+  - [x] `.sha256` sidecar next to the artifact found automatically
+  - [x] idempotency: running twice succeeds, binary still works
+  - [x] `--uninstall` removes the binary; uninstall-when-absent still
+        exits 0 with a notice
+  - [x] PATH warning printed when dest not on PATH; absent when it is
+  - [x] `--quiet` suppresses progress entirely (empty output on clean
+        install) but never errors
+  - [x] dest precedence: `--dest` > `BRAID_INSTALL_DIR` > `~/.local/bin`
+  - [x] archive without a `braid` member fails cleanly
+  - [x] shellcheck clean at `--severity=style` (skips if unavailable)
+- [x] Network-dependent test: version resolution against the real GitHub
+      API — written as `#[ignore]`, to be run in Phase 4 once a release
+      exists
 
 ### Phase 2: install.sh
 
-- [ ] Write `install.sh` (~300-400 lines): config/flags, plain-ANSI
-      logging, platform detection (os × arch only), version resolution
-      (API + redirect fallback), `download_file` (curl-only, retry),
-      SHA256 verify (sha256sum/shasum), extract tar.gz, atomic install,
-      PATH advice, `--from-source`, `--uninstall`, `trap` cleanup,
-      `{ main "$@"; }` wrapper
-- [ ] All Phase 1 tests green
-- [ ] Run shellcheck and fix findings
+- [x] Write `install.sh` (~370 lines): config/flags, plain-ANSI
+      logging (colors only when stderr is a tty), platform detection
+      (os × arch only), version resolution (API + redirect fallback),
+      `download_file` (curl-only, retry, `.part` + atomic mv), SHA256
+      verify (sha256sum/shasum), extract tar.gz, atomic install,
+      PATH advice, `--from-source`, `--uninstall`, `--print-platform`,
+      `trap` cleanup, `{ main "$@"; }` wrapper
+- [x] All Phase 1 tests green (26/26; TDD red phase confirmed first)
+- [x] shellcheck clean at `--severity=style` (installed locally via brew
+      so the conditional test exercises during development, not just CI)
+- [x] Smoke test with the real binary: tar.gz of `target/debug/braid`,
+      installed via the sidecar-checksum path, runs and reports its
+      version
+
+Decision recorded along the way: failure to resolve the latest version
+**dies** suggesting `--version`/`--from-source` rather than silently
+falling back to a multi-minute source build (explicit > implicit;
+diverges from beads_rust).
 
 ### Phase 3: release workflow
 
