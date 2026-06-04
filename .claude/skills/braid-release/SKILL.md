@@ -33,8 +33,10 @@ you're pushing.
    `checksums.sha256`.
 9. **Record it in the skein**: `BRAID_AUTHOR=claude braid comment` on a
    relevant strand, or a release note comment; `braid sync`.
-10. The local `~/.local/bin/braid` symlink points at `target/release/braid` —
-    run `cargo build --release` so the dev binary matches the released version.
+10. Reinstall the local binary through the production path — it doubles as
+    the final end-to-end check (checksum + signature against the pinned key):
+    `curl -fsSL https://raw.githubusercontent.com/cscheid/braid/main/install.sh | bash`
+    then confirm `braid --version` reports the new version.
 
 Versioning judgment: braid is pre-1.0; bump the minor for feature batches
 (new commands, MCP surface changes, schema-visible changes), the patch for

@@ -135,12 +135,17 @@ Extend `crates/braid/tests/installer.rs`:
 - [x] README install section: signature verification, pinned public key,
       "signing key since v0.2.1" note, escape-hatch documentation
 - [x] check agents-info.md for installer mentions needing updates
-- [ ] `cargo xtask ci` green
-- [ ] ask Carlos to push; cut v0.2.1 (braid-release skill) so a signed
-      release exists for the strict installer
-- [ ] after release: run the ignored `resolves_latest_version_from_github`
-      test as a live end-to-end check
-- [ ] close br-dgvi0nme with outcome comment
+- [x] `cargo xtask ci` green
+- [x] ask Carlos to push; cut v0.2.1 (braid-release skill) so a signed
+      release exists for the strict installer (released 2026-06-04,
+      13 assets, release workflow green on first signed run)
+- [x] after release: run the ignored `resolves_latest_version_from_github`
+      test as a live end-to-end check (passed; plus a real curl|bash
+      install: checksum ✓, signature ✓, trusted comment ✓)
+- [x] close br-dgvi0nme with outcome comment
+
+Phase 0 epilogue: Carlos backed up the keypair to Bitwarden and deletes
+the local `~/braid-minisign-key/` himself.
 
 ## Notes
 
