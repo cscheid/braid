@@ -78,4 +78,6 @@ and `--no-verify`-skippable); the optional pre-push hook is convenience.
 
 - [x] CLAUDE.md: run `cargo xtask ci` before asking to push; mention
       `cargo xtask fmt` and `cargo xtask install-hooks`
-- [ ] Comment + close strand br-xtask-fmt-jeuvc2d0 (after push)
+- [x] Comment + close strand br-xtask-fmt-jeuvc2d0 — pushed as
+      fbf5a0a..93f03df, CI green; gate already exercised by two
+      subsequent green pushes (MCP phase 3, v0.2.0)
