@@ -255,6 +255,72 @@ fn list_defaults_to_open_strands() {
 }
 
 #[test]
+fn list_filters_by_label_assignee_and_type() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&work).unwrap();
+    init_skein(&work, &home);
+
+    let a = create_issue(
+        &work,
+        &home,
+        &["A", "--label", "x", "--label", "y", "--assignee", "alice", "--type", "bug"],
+    );
+    let b = create_issue(&work, &home, &["B", "--label", "x"]);
+    let c = create_issue(&work, &home, &["C", "--assignee", "bob", "--type", "bug"]);
+    let d = create_issue(&work, &home, &["D", "--type", "rfc"]);
+
+    let ids = |args: &[&str]| -> Vec<String> {
+        let mut full = vec!["list", "--json"];
+        full.extend_from_slice(args);
+        let out = braid(&work, &home).args(&full).assert().success();
+        let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+        json.as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect()
+    };
+
+    // single label; repeated labels are AND
+    assert_eq!(ids(&["--label", "x"]), vec![a.clone(), b.clone()]);
+    assert_eq!(ids(&["--label", "x", "--label", "y"]), vec![a.clone()]);
+    assert_eq!(ids(&["--label", "nope"]), Vec::<String>::new());
+
+    // assignee: exact match; unassigned strands never match
+    assert_eq!(ids(&["--assignee", "alice"]), vec![a.clone()]);
+    assert_eq!(ids(&["--assignee", "ali"]), Vec::<String>::new());
+
+    // type, including arbitrary (Other) type strings
+    assert_eq!(ids(&["--type", "bug"]), vec![a.clone(), c.clone()]);
+    assert_eq!(ids(&["--type", "rfc"]), vec![d.clone()]);
+
+    // filters compose (AND across fields)
+    assert_eq!(ids(&["--type", "bug", "--assignee", "bob"]), vec![c.clone()]);
+    assert_eq!(ids(&["--type", "bug", "--label", "x"]), vec![a.clone()]);
+
+    // ...and compose with --status / --all
+    braid(&work, &home).args(["close", &a, "--reason", "test"]).assert().success();
+    assert_eq!(ids(&["--label", "x"]), vec![b.clone()], "default listing hides the closed strand");
+    assert_eq!(ids(&["--label", "x", "--all"]), vec![a.clone(), b.clone()]);
+    assert_eq!(ids(&["--label", "x", "--status", "closed"]), vec![a.clone()]);
+
+    // human listing respects filters too
+    braid(&work, &home)
+        .args(["list", "--label", "x"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("B").and(predicate::str::contains("C").not()));
+
+    // JSON output shape is unchanged: an array of full strand objects
+    let out = braid(&work, &home).args(["list", "--label", "x", "--json"]).assert().success();
+    let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let strand = &json.as_array().unwrap()[0];
+    assert_eq!(strand["id"], b.as_str());
+    assert_eq!(strand["title"], "B");
+    assert_eq!(strand["status"], "open");
+    assert_eq!(strand["labels"], serde_json::json!(["x"]));
+}
+
+#[test]
 fn missing_config_gives_helpful_error() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");

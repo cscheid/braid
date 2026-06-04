@@ -10,7 +10,8 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow, bail};
 use automerge::Automerge;
 use braid_core::amdoc::{hydrate, init_skein, reconcile_issue};
-use braid_core::schema::{Issue, SCHEMA_VERSION, SkeinMetadata};
+use braid_core::domain::ListFilter;
+use braid_core::schema::{Issue, IssueType, SCHEMA_VERSION, SkeinMetadata};
 use braid_core::time::now_rfc3339;
 use samod::DocumentId;
 
@@ -740,9 +741,29 @@ fn print_listing(issues: &[Issue]) {
     }
 }
 
-pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
+/// Raw field-filter flags shared by `list` and `ready`, converted to a
+/// domain [`ListFilter`] at this boundary (the type string parses the
+/// same way `create --type` does, so `Other(...)` types behave
+/// consistently).
+pub struct FilterOpts {
+    pub labels: Vec<String>,
+    pub assignee: Option<String>,
+    pub issue_type: Option<String>,
+}
+
+impl FilterOpts {
+    fn into_filter(self) -> ListFilter {
+        ListFilter {
+            labels: self.labels,
+            assignee: self.assignee,
+            issue_type: self.issue_type.map(|t| IssueType::from(t.as_str())),
+        }
+    }
+}
+
+pub async fn ready(cwd: &Path, filter: FilterOpts, json: bool) -> Result<()> {
     let session = Session::open(cwd).await?;
-    let ready = session.ready();
+    let ready = session.ready(&filter.into_filter());
     session.shutdown().await;
     let ready = ready?;
 
@@ -864,9 +885,15 @@ pub async fn sync(cwd: &Path) -> Result<()> {
 // list
 // ---------------------------------------------------------------------------
 
-pub async fn list(cwd: &Path, status: Option<String>, all: bool, json: bool) -> Result<()> {
+pub async fn list(
+    cwd: &Path,
+    status: Option<String>,
+    all: bool,
+    filter: FilterOpts,
+    json: bool,
+) -> Result<()> {
     let session = Session::open(cwd).await?;
-    let issues = session.list(status.as_deref(), all);
+    let issues = session.list(status.as_deref(), all, &filter.into_filter());
     session.shutdown().await;
     let issues = issues?;
 

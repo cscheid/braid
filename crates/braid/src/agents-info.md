@@ -55,9 +55,9 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 
 | command | purpose |
 |---|---|
-| `braid ready [--json]` | active, unblocked strands — best starting point |
+| `braid ready [--label L]... [--assignee A] [--type T] [--json]` | active, unblocked strands — best starting point. Filters narrow the set: `--label` is repeatable (a strand must carry all), `--assignee` is an exact match, `--type` matches the issue type |
 | `braid blocked [--json]` | active strands blocked by dependencies, with blockers |
-| `braid list [--status S] [--all] [--json]` | open (non-closed) strands; `--all` includes closed |
+| `braid list [--status S] [--all] [--label L]... [--assignee A] [--type T] [--json]` | open (non-closed) strands; `--all` includes closed. Same field filters as `ready` |
 | `braid show <id> [--json]` | one strand (unique id fragments work: `braid show 6j42`) |
 | `braid search <text> [--json]` | case-insensitive substring over titles, prose, labels, comments |
 | `braid create <title> [flags]` | new strand; prints its id. Flags: `--description --type --priority --label --slug --assignee --json` |

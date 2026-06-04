@@ -343,6 +343,50 @@ async fn agent_workflow_end_to_end() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn list_and_ready_accept_field_filters() {
+    let tmp = tempfile::tempdir().unwrap();
+    let skein = Skein::new(tmp.path(), "a");
+    skein.init(DEAD_SERVER);
+
+    let mut client = McpClient::spawn(&skein, &[]).await;
+    let a = client
+        .call(
+            "braid_create",
+            json!({"title": "A", "labels": ["x", "y"], "assignee": "alice", "type": "bug"}),
+        )
+        .await;
+    let a_id = a["id"].as_str().unwrap().to_string();
+    let b = client.call("braid_create", json!({"title": "B", "labels": ["x"]})).await;
+    let b_id = b["id"].as_str().unwrap().to_string();
+
+    let strand_ids = |v: &Value| -> Vec<String> {
+        v["strands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // braid_list: labels are AND; assignee/type narrow further
+    let list = client.call("braid_list", json!({"labels": ["x"]})).await;
+    assert_eq!(strand_ids(&list), vec![a_id.clone(), b_id.clone()]);
+    let list = client.call("braid_list", json!({"labels": ["x", "y"]})).await;
+    assert_eq!(strand_ids(&list), vec![a_id.clone()]);
+    assert_eq!(list["count"], json!(1));
+    let list = client.call("braid_list", json!({"assignee": "alice", "type": "bug"})).await;
+    assert_eq!(strand_ids(&list), vec![a_id.clone()]);
+
+    // braid_ready accepts the same filters
+    let ready = client.call("braid_ready", json!({"labels": ["x"]})).await;
+    assert_eq!(strand_ids(&ready), vec![a_id.clone(), b_id.clone()]);
+    let ready = client.call("braid_ready", json!({"type": "bug"})).await;
+    assert_eq!(strand_ids(&ready), vec![a_id.clone()]);
+    let ready = client.call("braid_ready", json!({"assignee": "nobody"})).await;
+    assert_eq!(strand_ids(&ready), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn doc_id_never_crosses_the_wire() {
     let tmp = tempfile::tempdir().unwrap();
     let skein = Skein::new(tmp.path(), "a");

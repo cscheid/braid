@@ -171,6 +171,37 @@ fn ready_supports_json() {
 }
 
 #[test]
+fn ready_filters_by_label_assignee_and_type() {
+    let (_tmp, t) = Skein::new();
+    // `blocked` carries the filter label but is dependency-blocked: the
+    // filters narrow the ready set, they never resurrect blocked strands.
+    let blocked = t.create(&["Blocked", "--label", "x"]);
+    let blocker = t.create(&["Blocker", "--label", "x", "--assignee", "alice", "--type", "bug"]);
+    let plain = t.create(&["Plain"]);
+    t.braid().args(["dep", "add", &blocked, &blocker]).assert().success();
+
+    let ids = |args: &[&str]| -> Vec<String> {
+        let mut full = vec!["ready", "--json"];
+        full.extend_from_slice(args);
+        let out = t.braid().args(&full).assert().success();
+        let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+        json.as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect()
+    };
+
+    // unfiltered baseline: everything awake and unblocked
+    assert_eq!(ids(&[]), vec![blocker.clone(), plain.clone()]);
+
+    // each filter narrows the ready set (and blocked stays excluded)
+    assert_eq!(ids(&["--label", "x"]), vec![blocker.clone()]);
+    assert_eq!(ids(&["--assignee", "alice"]), vec![blocker.clone()]);
+    assert_eq!(ids(&["--type", "bug"]), vec![blocker.clone()]);
+
+    // filters compose; a non-matching combination is empty
+    assert_eq!(ids(&["--label", "x", "--type", "bug"]), vec![blocker.clone()]);
+    assert_eq!(ids(&["--label", "x", "--assignee", "bob"]), Vec::<String>::new());
+}
+
+#[test]
 fn parent_child_does_not_block_child_in_ready() {
     let (_tmp, t) = Skein::new();
     let epic = t.create(&["Epic", "--type", "epic"]);

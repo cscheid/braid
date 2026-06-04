@@ -18,8 +18,29 @@
 
 use std::collections::BTreeSet;
 
-use crate::schema::{Issue, Skein, Status};
+use crate::schema::{Issue, IssueType, Skein, Status};
 use crate::time::is_after;
+
+/// Field filters shared by the `list` and `ready` listings, so the two
+/// commands cannot drift apart in semantics. Every populated field must
+/// match (AND across fields); an empty filter matches everything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListFilter {
+    /// Required labels: a strand must carry *all* of them (AND).
+    pub labels: Vec<String>,
+    /// Exact assignee match; strands with no assignee never match.
+    pub assignee: Option<String>,
+    /// Issue type; arbitrary strings match `Other(...)` strands.
+    pub issue_type: Option<IssueType>,
+}
+
+impl ListFilter {
+    pub fn matches(&self, issue: &Issue) -> bool {
+        self.labels.iter().all(|l| issue.labels.contains(l))
+            && self.assignee.as_deref().is_none_or(|a| issue.assignee.as_deref() == Some(a))
+            && self.issue_type.as_ref().is_none_or(|t| issue.issue_type == *t)
+    }
+}
 
 /// The issues actively blocking `issue`, in dependency-key order.
 pub fn active_blockers<'t>(skein: &'t Skein, issue: &Issue) -> Vec<&'t Issue> {
@@ -186,4 +207,99 @@ pub fn dependents_of<'t>(skein: &'t Skein, id: &str) -> Vec<&'t Issue> {
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schema::IssueType;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn issue(labels: &[&str], assignee: Option<&str>, issue_type: IssueType) -> Issue {
+        Issue {
+            id: "br-test01".into(),
+            title: "test".into(),
+            description: None,
+            design: None,
+            acceptance_criteria: None,
+            notes: None,
+            status: Status::Open,
+            priority: 2,
+            issue_type,
+            assignee: assignee.map(String::from),
+            created_at: "2026-06-04T00:00:00Z".into(),
+            created_by: "test".into(),
+            updated_at: "2026-06-04T00:00:00Z".into(),
+            closed_at: None,
+            close_reason: None,
+            defer_until: None,
+            external_ref: None,
+            labels: labels.iter().map(|s| s.to_string()).collect::<BTreeSet<_>>(),
+            dependencies: BTreeMap::new(),
+            comments: BTreeMap::new(),
+        }
+    }
+
+    fn labels(labels: &[&str]) -> ListFilter {
+        ListFilter { labels: labels.iter().map(|s| s.to_string()).collect(), ..Default::default() }
+    }
+
+    fn assignee(a: &str) -> ListFilter {
+        ListFilter { assignee: Some(a.to_string()), ..Default::default() }
+    }
+
+    fn issue_type(t: &str) -> ListFilter {
+        ListFilter { issue_type: Some(IssueType::from(t)), ..Default::default() }
+    }
+
+    #[test]
+    fn empty_filter_matches_everything() {
+        assert!(ListFilter::default().matches(&issue(&[], None, IssueType::Task)));
+        assert!(ListFilter::default().matches(&issue(&["x"], Some("alice"), IssueType::Bug)));
+    }
+
+    #[test]
+    fn label_filter_requires_all_labels() {
+        let i = issue(&["x", "y"], None, IssueType::Task);
+        assert!(labels(&["x"]).matches(&i));
+        assert!(labels(&["y"]).matches(&i));
+        assert!(labels(&["x", "y"]).matches(&i));
+        assert!(!labels(&["x", "z"]).matches(&i), "AND semantics: every label must be present");
+        assert!(!labels(&["z"]).matches(&i));
+        assert!(!labels(&["x"]).matches(&issue(&[], None, IssueType::Task)));
+    }
+
+    #[test]
+    fn assignee_filter_is_exact_and_skips_unassigned() {
+        let i = issue(&[], Some("alice"), IssueType::Task);
+        assert!(assignee("alice").matches(&i));
+        assert!(!assignee("bob").matches(&i));
+        assert!(!assignee("ali").matches(&i), "exact match, not substring");
+        assert!(!assignee("alice").matches(&issue(&[], None, IssueType::Task)));
+    }
+
+    #[test]
+    fn type_filter_matches_known_and_custom_types() {
+        let bug = issue(&[], None, IssueType::Bug);
+        assert!(issue_type("bug").matches(&bug));
+        assert!(!issue_type("task").matches(&bug));
+        // arbitrary strings match Other(...) strands, consistent with the
+        // schema's tolerance for unknown types
+        let rfc = issue(&[], None, IssueType::from("rfc"));
+        assert!(issue_type("rfc").matches(&rfc));
+        assert!(!issue_type("bug").matches(&rfc));
+    }
+
+    #[test]
+    fn filters_compose_with_and() {
+        let i = issue(&["x"], Some("alice"), IssueType::Bug);
+        let f = ListFilter {
+            labels: vec!["x".into()],
+            assignee: Some("alice".into()),
+            issue_type: Some(IssueType::Bug),
+        };
+        assert!(f.matches(&i));
+        let f = ListFilter { assignee: Some("bob".into()), ..f };
+        assert!(!f.matches(&i), "one failing field fails the whole filter");
+    }
 }

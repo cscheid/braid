@@ -25,6 +25,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
+use braid_core::domain::ListFilter;
+use braid_core::schema::IssueType;
 use rmcp::ServiceExt;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
@@ -69,15 +71,38 @@ fn specs() -> Vec<ToolSpec> {
     fn no_params() -> Value {
         json!({"type": "object", "properties": {}, "additionalProperties": false})
     }
+    /// The field filters shared by braid_list and braid_ready.
+    fn filter_params() -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "labels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Require labels: a strand must carry all of them"
+                },
+                "assignee": {
+                    "type": "string",
+                    "description": "Exact assignee match (unassigned strands never match)"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Issue type: task|bug|feature|epic|chore|docs|question"
+                }
+            },
+            "additionalProperties": false
+        })
+    }
     vec![
         ToolSpec {
             name: "braid_ready",
             description: "List strands that are ready to work on (active status, no \
                           unresolved blocking dependencies). The best starting point \
-                          for picking work.",
+                          for picking work. Optionally narrow by labels (all must \
+                          match), assignee, or type.",
             tier: Tier::Query,
             idempotent: true,
-            schema: no_params,
+            schema: filter_params,
         },
         ToolSpec {
             name: "braid_blocked",
@@ -90,24 +115,29 @@ fn specs() -> Vec<ToolSpec> {
         ToolSpec {
             name: "braid_list",
             description: "List open (non-closed) strands. Filter to a single status \
-                          with `status`, or include closed strands with `all`.",
+                          with `status`, or include closed strands with `all`; \
+                          optionally narrow by labels (all must match), assignee, \
+                          or type.",
             tier: Tier::Query,
             idempotent: true,
             schema: || {
-                json!({
-                    "type": "object",
-                    "properties": {
-                        "status": {
-                            "type": "string",
-                            "description": "Filter: open|in_progress|blocked|deferred|closed"
-                        },
-                        "all": {
-                            "type": "boolean",
-                            "description": "Include closed strands (ignored when status is given)"
-                        }
-                    },
-                    "additionalProperties": false
-                })
+                let mut schema = filter_params();
+                let props = schema["properties"].as_object_mut().unwrap();
+                props.insert(
+                    "status".into(),
+                    json!({
+                        "type": "string",
+                        "description": "Filter: open|in_progress|blocked|deferred|closed"
+                    }),
+                );
+                props.insert(
+                    "all".into(),
+                    json!({
+                        "type": "boolean",
+                        "description": "Include closed strands (ignored when status is given)"
+                    }),
+                );
+                schema
             },
         },
         ToolSpec {
@@ -444,9 +474,29 @@ impl BraidServer {
     }
 
     async fn dispatch(&self, name: &str, args: Value) -> Result<Value> {
+        /// The filter params shared by braid_ready and braid_list.
+        #[derive(Default, Deserialize)]
+        struct FilterP {
+            #[serde(default)]
+            labels: Vec<String>,
+            assignee: Option<String>,
+            #[serde(rename = "type")]
+            issue_type: Option<String>,
+        }
+        impl FilterP {
+            fn into_filter(self) -> ListFilter {
+                ListFilter {
+                    labels: self.labels,
+                    assignee: self.assignee,
+                    issue_type: self.issue_type.map(|t| IssueType::from(t.as_str())),
+                }
+            }
+        }
+
         match name {
             "braid_ready" => {
-                let strands = self.session.ready()?;
+                let p: FilterP = serde_json::from_value(args)?;
+                let strands = self.session.ready(&p.into_filter())?;
                 Ok(json!({"strands": strands, "count": strands_len(&strands)}))
             }
             "braid_blocked" => {
@@ -459,9 +509,12 @@ impl BraidServer {
                     status: Option<String>,
                     #[serde(default)]
                     all: bool,
+                    #[serde(flatten)]
+                    filter: FilterP,
                 }
                 let p: P = serde_json::from_value(args)?;
-                let strands = self.session.list(p.status.as_deref(), p.all)?;
+                let strands =
+                    self.session.list(p.status.as_deref(), p.all, &p.filter.into_filter())?;
                 Ok(json!({"strands": strands, "count": strands_len(&strands)}))
             }
             "braid_show" => {

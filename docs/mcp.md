@@ -77,6 +77,10 @@ enforcement.
 
 - Tool outputs are `structuredContent`; strand records conform to
   [the published JSON Schema](schemas/strand.schema.json).
+- `braid_list` and `braid_ready` accept optional field filters: `labels`
+  (array — a strand must carry **all** of them), `assignee` (exact match;
+  unassigned strands never match), and `type`. `braid_list` additionally
+  takes `status` / `all`, mirroring the CLI flags.
 - Mutation results carry `sync: "confirmed" | "unconfirmed" | "offline"` —
   whether the sync server acknowledged the change. Offline keeps working;
   results tell the truth. There is no sync tool: the session syncs

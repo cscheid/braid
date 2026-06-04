@@ -66,6 +66,15 @@ enum Cmd {
         /// Include closed strands
         #[arg(long, conflicts_with = "status")]
         all: bool,
+        /// Require a label (repeatable: a strand must carry all of them)
+        #[arg(short, long = "label")]
+        label: Vec<String>,
+        /// Filter by exact assignee
+        #[arg(long)]
+        assignee: Option<String>,
+        /// Filter by issue type: task|bug|feature|epic|chore|docs|question
+        #[arg(short = 't', long = "type")]
+        issue_type: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -150,6 +159,15 @@ enum Cmd {
     },
     /// List strands that are ready to work on (active, unblocked)
     Ready {
+        /// Require a label (repeatable: a strand must carry all of them)
+        #[arg(short, long = "label")]
+        label: Vec<String>,
+        /// Filter by exact assignee
+        #[arg(long)]
+        assignee: Option<String>,
+        /// Filter by issue type: task|bug|feature|epic|chore|docs|question
+        #[arg(short = 't', long = "type")]
+        issue_type: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -256,7 +274,10 @@ async fn main() {
             .await
         }
         Cmd::Show { id, json } => commands::show(&cwd, &id, json).await,
-        Cmd::List { status, all, json } => commands::list(&cwd, status, all, json).await,
+        Cmd::List { status, all, label, assignee, issue_type, json } => {
+            let filter = commands::FilterOpts { labels: label, assignee, issue_type };
+            commands::list(&cwd, status, all, filter, json).await
+        }
         Cmd::Update {
             id,
             title,
@@ -310,7 +331,10 @@ async fn main() {
             DepCmd::List { issue } => commands::dep_list(&cwd, &issue).await,
             DepCmd::Cycles => commands::dep_cycles(&cwd).await,
         },
-        Cmd::Ready { json } => commands::ready(&cwd, json).await,
+        Cmd::Ready { label, assignee, issue_type, json } => {
+            let filter = commands::FilterOpts { labels: label, assignee, issue_type };
+            commands::ready(&cwd, filter, json).await
+        }
         Cmd::Blocked { json } => commands::blocked(&cwd, json).await,
         Cmd::Search { text, json } => commands::search(&cwd, &text, json).await,
         Cmd::AgentsInfo => {

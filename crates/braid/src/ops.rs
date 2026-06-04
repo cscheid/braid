@@ -18,7 +18,8 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use braid_core::amdoc::{delete_issue, hydrate, hydrate_metadata, reconcile_issue};
 use braid_core::domain::{
-    blocked_issues, dependency_cycles, dependents_of, listing_order, open_children, ready_issues,
+    ListFilter, blocked_issues, dependency_cycles, dependents_of, listing_order, open_children,
+    ready_issues,
 };
 use braid_core::id::{new_comment_id, new_issue_id};
 use braid_core::schema::{Comment, Dependency, DependencyType, Issue, IssueType, Skein, Status};
@@ -253,9 +254,13 @@ impl Session {
 
     // -- queries ------------------------------------------------------------
 
-    pub fn ready(&self) -> Result<Vec<Issue>> {
+    pub fn ready(&self, filter: &ListFilter) -> Result<Vec<Issue>> {
         let skein = self.hydrate()?;
-        Ok(ready_issues(&skein, &now_rfc3339()).into_iter().cloned().collect())
+        Ok(ready_issues(&skein, &now_rfc3339())
+            .into_iter()
+            .filter(|i| filter.matches(i))
+            .cloned()
+            .collect())
     }
 
     pub fn blocked(&self) -> Result<Vec<BlockedStrand>> {
@@ -270,8 +275,9 @@ impl Session {
     }
 
     /// List strands: open (non-closed) ones by default, a single status
-    /// when `status` is given, everything when `all` is set.
-    pub fn list(&self, status: Option<&str>, all: bool) -> Result<Vec<Issue>> {
+    /// when `status` is given, everything when `all` is set; `filter`
+    /// narrows further by labels/assignee/type.
+    pub fn list(&self, status: Option<&str>, all: bool, filter: &ListFilter) -> Result<Vec<Issue>> {
         let skein = self.hydrate()?;
         let mut issues: Vec<&Issue> = skein
             .issues
@@ -280,6 +286,7 @@ impl Session {
                 Some(s) => i.status.as_str() == s,
                 None => all || !i.status.is_terminal(),
             })
+            .filter(|i| filter.matches(i))
             .collect();
         issues.sort_by(|a, b| listing_order(a, b));
         Ok(issues.into_iter().cloned().collect())
