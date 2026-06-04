@@ -64,6 +64,8 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid update <id> [flags]` | change fields: `--title --description --design --acceptance-criteria --notes --status --priority --type --assignee --external-ref --add-label --remove-label`; empty string clears |
 | `braid close <id>... [--reason R] [--force]` | close; refuses if open children unless `--force` |
 | `braid reopen <id>...` | reopen closed strands |
+| `braid defer <id>... [--until W]` | park strands. `--until` takes RFC 3339 (`2026-07-01T09:00:00Z`), a date (`2026-07-01`), or a duration (`36h`, `7d`, `2w`); once it passes, the strand counts as ready again (no daemon — readers compute the wake). Without `--until` it sleeps until `undefer` |
+| `braid undefer <id>...` | wake deferred strands now (status back to `open`) |
 | `braid delete <id>... [--force]` | remove strands entirely. Prefer `close` — a delete wins over concurrent edits and cannot be undone; `--force` needed if other strands reference the target |
 | `braid comment <id> <text>` | append a comment |
 | `braid dep add <id> <target> [--type T]` | `<id>` depends on `<target>`; default type `blocks` |
@@ -81,7 +83,11 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 
 Conventions:
 
-- **statuses**: `open`, `in_progress`, `blocked`, `deferred`, `closed`
+- **statuses**: `open`, `in_progress`, `blocked`, `deferred`, `closed`.
+  A `deferred` strand whose `defer_until` has passed shows up in `ready`
+  with its status still reading `deferred` — pick it up normally (e.g.
+  `update --status in_progress`); leaving `deferred` clears the wake time.
+  Deferral does not release dependents: only `closed` unblocks them
 - **types**: `task`, `bug`, `feature`, `epic`, `chore`, `docs`, `question`
 - **priority**: `0` (critical) … `4` (backlog); default `2`
 - **dependency types**: `blocks`, `conditional-blocks`, `waits-for` make a

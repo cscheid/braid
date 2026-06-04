@@ -138,7 +138,7 @@ exports that carry it. Additive change, noted in the schema `$comment`.
 
 ### Phase 4 — docs & wrap-up
 
-- [ ] `crates/braid/src/agents-info.md`: document defer/undefer and the
-      read-time wake rule
-- [ ] README command list (if it enumerates commands)
-- [ ] Comment + close strand br-om28mvo7 (BRAID_AUTHOR=claude)
+- [x] `crates/braid/src/agents-info.md`: document defer/undefer and the
+      read-time wake rule (command table rows + statuses convention note)
+- [x] README command list — README enumerates no commands; nothing to do
+- [x] Comment on strand br-om28mvo7 (BRAID_AUTHOR=claude); close on merge
