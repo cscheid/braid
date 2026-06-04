@@ -189,6 +189,7 @@ const DEFAULT_TOOLS: &[&str] = &[
     "braid_close",
     "braid_comment",
     "braid_create",
+    "braid_defer",
     "braid_dep_add",
     "braid_dep_cycles",
     "braid_dep_list",
@@ -199,6 +200,7 @@ const DEFAULT_TOOLS: &[&str] = &[
     "braid_reopen",
     "braid_search",
     "braid_show",
+    "braid_undefer",
     "braid_update",
 ];
 

@@ -267,6 +267,45 @@ fn specs() -> Vec<ToolSpec> {
             },
         },
         ToolSpec {
+            name: "braid_defer",
+            description: "Defer strands (status -> deferred) with an optional wake \
+                          time; once it passes they count as ready again. Omitted \
+                          wake = sleeps until braid_undefer.",
+            tier: Tier::Mutate,
+            idempotent: true,
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                        "until": {
+                            "type": "string",
+                            "description": "RFC 3339 (2026-07-01T09:00:00Z), date \
+                                            (2026-07-01), or duration from now (36h, 7d, 2w)"
+                        }
+                    },
+                    "required": ["ids"],
+                    "additionalProperties": false
+                })
+            },
+        },
+        ToolSpec {
+            name: "braid_undefer",
+            description: "Wake deferred strands now (status back to open).",
+            tier: Tier::Mutate,
+            idempotent: true,
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "ids": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+                    },
+                    "required": ["ids"],
+                    "additionalProperties": false
+                })
+            },
+        },
+        ToolSpec {
             name: "braid_comment",
             description: "Append a comment to a strand.",
             tier: Tier::Mutate,
@@ -540,6 +579,23 @@ impl BraidServer {
                 }
                 let p: P = serde_json::from_value(args)?;
                 Ok(serde_json::to_value(self.session.reopen(&p.ids).await?)?)
+            }
+            "braid_defer" => {
+                #[derive(Deserialize)]
+                struct P {
+                    ids: Vec<String>,
+                    until: Option<String>,
+                }
+                let p: P = serde_json::from_value(args)?;
+                Ok(serde_json::to_value(self.session.defer(&p.ids, p.until).await?)?)
+            }
+            "braid_undefer" => {
+                #[derive(Deserialize)]
+                struct P {
+                    ids: Vec<String>,
+                }
+                let p: P = serde_json::from_value(args)?;
+                Ok(serde_json::to_value(self.session.undefer(&p.ids).await?)?)
             }
             "braid_comment" => {
                 #[derive(Deserialize)]

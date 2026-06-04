@@ -58,6 +58,20 @@ Complex plans can have phases, and work items are then split into multiple lists
 
 For simple tasks (single file changes, bug fixes), the TodoWrite tool is sufficient.
 
+## Documentation discipline
+
+User-facing changes land **with their documentation in the same commit**:
+
+- new/changed CLI commands → `crates/braid/src/agents-info.md` (the
+  version-matched agent guide) and, if conceptually significant, README
+- new/changed MCP tools → `docs/mcp.md` (capability-tier table)
+- schema/JSONL changes → `docs/schemas/` (and its contract tests)
+- vocabulary → `docs/terminology.md`
+
+`crates/braid/tests/docs_drift.rs` enforces the first two mechanically
+(every subcommand must appear in agents-info; every MCP tool in
+docs/mcp.md) — if it fails, update the docs, don't loosen the test.
+
 ## Git workflow
 
 Committing locally is always fine. **Do not run git commands that change
