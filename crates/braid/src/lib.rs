@@ -8,6 +8,7 @@ pub mod commands;
 pub mod config;
 pub mod docid;
 pub mod import;
+pub mod mcp;
 pub mod ops;
 pub mod sync;
 pub mod skein;

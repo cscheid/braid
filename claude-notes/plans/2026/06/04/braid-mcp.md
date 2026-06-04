@@ -204,15 +204,23 @@ beyond what `.braid.toml` already holds.
       the e2e suite pins exact output text)
 
 ### Phase 1 — MCP server, tools
-- [ ] `braid mcp` subcommand (stdio, rmcp), tool registry per the table
-- [ ] typed input schemas; outputs are schema-conformant strand records
-- [ ] tool annotations on every tool (readOnlyHint/destructiveHint/
-      idempotentHint); `--enable-destructive` gate for delete/import,
-      default off (e2e: absent from tools/list without the flag)
-- [ ] rotation re-check per op; `synced` flag on mutation results
-- [ ] `--read-only`; `--project`; server-level identity
-- [ ] e2e stdio harness (spawn, initialize, tools/list, tools/call)
-- [ ] hygiene e2e: doc id absent from every tool result and error
+- [x] `braid mcp` subcommand (stdio, rmcp 1.7 — post-1.0, better than the
+      plan assumed; manual ServerHandler impl for full control of
+      annotations and gating; src/mcp.rs)
+- [x] typed input schemas; outputs are schema-conformant strand records
+      (CallToolResult::structured; braid_show output validated against
+      docs/schemas/strand.schema.json in the e2e suite)
+- [x] tool annotations on every tool; `--enable-destructive` gate for
+      delete/import, default off (e2e: absent from tools/list AND refused
+      at call time — the GitHub-bypass lesson, both directions tested)
+- [x] rotation re-check per op (e2e: a *running* server starts refusing
+      after another clone rotates the skein through the live relay);
+      `sync` field on mutation results (confirmed|unconfirmed|offline)
+- [x] `--read-only` (call-time enforced); `--project`; server-level
+      identity via BRAID_AUTHOR (asserted in created_by)
+- [x] e2e stdio harness: raw newline-delimited JSON-RPC client speaking
+      initialize/tools-list/tools-call to the spawned binary
+- [x] hygiene e2e: full protocol transcript asserted free of the doc id
 
 ### Phase 2 — docs
 - [ ] README section + docs/mcp.md (host setup snippets: Claude Code,

@@ -183,6 +183,18 @@ enum Cmd {
     },
     /// Sync with the configured server (fails if unreachable)
     Sync,
+    /// Serve this skein to MCP hosts over stdio (Claude Desktop, IDEs, ...)
+    Mcp {
+        /// Project directory (defaults to the current directory)
+        #[arg(long)]
+        project: Option<std::path::PathBuf>,
+        /// Serve only read-only tools
+        #[arg(long)]
+        read_only: bool,
+        /// Expose braid_delete and braid_import (no-undo operations)
+        #[arg(long, conflicts_with = "read_only")]
+        enable_destructive: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -313,6 +325,10 @@ async fn main() {
         Cmd::Import { path } => commands::import(&cwd, &path).await,
         Cmd::Export => commands::export(&cwd).await,
         Cmd::Sync => commands::sync(&cwd).await,
+        Cmd::Mcp { project, read_only, enable_destructive } => {
+            braid::mcp::serve(braid::mcp::McpOpts { project, read_only, enable_destructive })
+                .await
+        }
     };
 
     if let Err(e) = result {
