@@ -6,7 +6,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/cscheid/tracker"
+repository = "https://github.com/cscheid/braid"
 
 # automerge is 10-100x slower unoptimized (per-character text ops); keep it
 # optimized even in dev builds so tests and debug binaries stay usable.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/cscheid/tracker/main/docs/schemas/strand.schema.json",
+  "$id": "https://raw.githubusercontent.com/cscheid/braid/main/docs/schemas/strand.schema.json",
   "title": "braid strand record",
   "description": "One strand (issue) as emitted by `braid export`: one JSON object per JSONL line. This is the strict writer contract — `braid import` accepts a superset (see docs/schemas/README.md). The schema is version-matched to the braid release that ships it.",
   "$comment": "braid 0.1.0; document schema_version 1",
