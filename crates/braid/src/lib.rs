@@ -10,3 +10,4 @@ pub mod docid;
 pub mod import;
 pub mod sync;
 pub mod skein;
+pub mod ws;
