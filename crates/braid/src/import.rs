@@ -203,6 +203,23 @@ fn convert(raw: RawIssue, now: &str) -> Issue {
     }
 }
 
+/// Strand ids appear as map keys and inside dependency keys
+/// (`<id>:<type>`), so the export contract (docs/schemas/strand.schema.json)
+/// forbids colons and whitespace. Import enforces this: anything import
+/// accepts, export will later emit.
+fn validate_id(id: &str, what: &str) -> Result<()> {
+    if id.is_empty() {
+        anyhow::bail!("{what} id is empty");
+    }
+    if id.contains(':') || id.contains(char::is_whitespace) {
+        anyhow::bail!(
+            "{what} id {id:?} contains a colon or whitespace, which the braid \
+             JSONL contract forbids (docs/schemas/strand.schema.json)"
+        );
+    }
+    Ok(())
+}
+
 /// Parse JSONL text (beads or braid format) into issues. Fails on the
 /// first malformed line, naming its 1-based line number.
 pub fn parse_jsonl(text: &str) -> Result<Vec<Issue>> {
@@ -212,9 +229,21 @@ pub fn parse_jsonl(text: &str) -> Result<Vec<Issue>> {
         if line.trim().is_empty() {
             continue;
         }
-        let raw: RawIssue = serde_json::from_str(line)
-            .with_context(|| format!("line {}: not a valid issue record", idx + 1))?;
-        issues.push(convert(raw, &now));
+        let context = || format!("line {}: not a valid issue record", idx + 1);
+        let raw: RawIssue = serde_json::from_str(line).with_context(context)?;
+        let issue = convert(raw, &now);
+        (|| -> Result<()> {
+            validate_id(&issue.id, "strand")?;
+            for dep in issue.dependencies.values() {
+                validate_id(&dep.depends_on_id, "dependency target")?;
+            }
+            for comment in issue.comments.values() {
+                validate_id(&comment.id, "comment")?;
+            }
+            Ok(())
+        })()
+        .with_context(|| format!("line {}", idx + 1))?;
+        issues.push(issue);
     }
     Ok(issues)
 }

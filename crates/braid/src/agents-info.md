@@ -68,7 +68,7 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid dep cycles` | report dependency cycles |
 | `braid sync` | force a sync; fails when the server is unreachable |
 | `braid import <file>` | import strands from JSONL (beads or braid format) |
-| `braid export` | all strands as JSONL on stdout (backup / grep surface) |
+| `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |
 
 Conventions:

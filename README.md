@@ -121,6 +121,12 @@ Import upserts by issue id and accepts both beads JSONL and braid's own
 with collision-free string ids; beads-only fields (`source_repo`,
 compaction machinery, etc.) are dropped.
 
+Export records conform to a published JSON Schema —
+[`docs/schemas/strand.schema.json`](docs/schemas/strand.schema.json) —
+the contract for downstream tooling; see
+[`docs/schemas/README.md`](docs/schemas/README.md) for import
+tolerances and the deltas vs the automerge document shape.
+
 ## Development
 
 ```sh

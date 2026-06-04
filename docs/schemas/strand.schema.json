@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/cscheid/tracker/main/docs/schemas/strand.schema.json",
+  "title": "braid strand record",
+  "description": "One strand (issue) as emitted by `braid export`: one JSON object per JSONL line. This is the strict writer contract — `braid import` accepts a superset (see docs/schemas/README.md). The schema is version-matched to the braid release that ships it.",
+  "$comment": "braid 0.1.0; document schema_version 1",
+  "type": "object",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/strandId",
+      "description": "Unique within the skein. braid generates `<prefix>-[slug-]<8 base36 chars>`; imported ids (e.g. beads `bd-xxxx`) are preserved."
+    },
+    "title": { "type": "string" },
+    "description": { "$ref": "#/$defs/prose" },
+    "design": { "$ref": "#/$defs/prose" },
+    "acceptance_criteria": { "$ref": "#/$defs/prose" },
+    "notes": { "$ref": "#/$defs/prose" },
+    "status": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Well-known values: open, in_progress, blocked, deferred, closed. Other strings round-trip losslessly (forward compatibility); consumers should treat unknown statuses as neither active nor terminal."
+    },
+    "priority": {
+      "type": "integer",
+      "description": "0 (critical) .. 4 (backlog) by convention; braid does not reject other integers."
+    },
+    "issue_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Well-known values: task, bug, feature, epic, chore, docs, question. Other strings round-trip losslessly."
+    },
+    "assignee": { "type": "string" },
+    "created_at": { "$ref": "#/$defs/timestamp" },
+    "created_by": { "type": "string" },
+    "updated_at": { "$ref": "#/$defs/timestamp" },
+    "closed_at": { "$ref": "#/$defs/timestamp" },
+    "close_reason": { "type": "string" },
+    "external_ref": { "type": "string" },
+    "labels": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "minItems": 1,
+      "description": "Sorted, deduplicated. Omitted entirely when empty (a map-as-set in the underlying automerge document)."
+    },
+    "dependencies": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Outgoing edges, keyed by `<depends_on_id>:<type>`. The key duplicates the entry's fields; consumers should read the fields, not parse the key. Omitted when empty.",
+      "propertyNames": { "pattern": "^[^:\\s]+:[^\\s]+$" },
+      "additionalProperties": { "$ref": "#/$defs/dependency" }
+    },
+    "comments": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Keyed by comment id (the entry's `id` field duplicates its key). Omitted when empty.",
+      "propertyNames": { "$ref": "#/$defs/strandId" },
+      "additionalProperties": { "$ref": "#/$defs/comment" }
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "status",
+    "priority",
+    "issue_type",
+    "created_at",
+    "created_by",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "strandId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^:\\s]+$",
+      "$comment": "No colons (the dependency-key separator) and no whitespace. Enforced by braid import."
+    },
+    "prose": {
+      "type": "string",
+      "description": "Markdown by convention. Stored as collaborative Text in the automerge document; plain string here."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "braid writes RFC 3339 UTC with microsecond precision (e.g. 2026-06-03T14:37:32.946678Z). Imported timestamps are preserved as-is, so consumers should parse permissively; `format` is an annotation, not an assertion."
+    },
+    "dependency": {
+      "type": "object",
+      "properties": {
+        "depends_on_id": {
+          "$ref": "#/$defs/strandId",
+          "description": "May be dangling (target absent from the skein); dangling edges never block."
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Well-known values: blocks, conditional-blocks, waits-for (block ready-work); parent-child (hierarchy: open children gate the parent's close); related, discovered-from, replies-to, duplicates, supersedes, caused-by (informational). Other strings round-trip losslessly and are treated as informational."
+        },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "created_by": { "type": "string" }
+      },
+      "required": ["depends_on_id", "type", "created_at", "created_by"],
+      "additionalProperties": false
+    },
+    "comment": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/strandId" },
+        "author": { "type": "string" },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "text": { "$ref": "#/$defs/prose" }
+      },
+      "required": ["id", "author", "created_at", "text"],
+      "additionalProperties": false
+    }
+  }
+}
