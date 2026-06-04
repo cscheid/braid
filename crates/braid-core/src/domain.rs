@@ -8,13 +8,18 @@
 //!   (`blocks`, `parent-child`, `conditional-blocks`, `waits-for`) **and**
 //!   its target exists **and** the target's status is not terminal
 //! - dangling edges (target id absent from the skein) never block
-//! - **ready** = active status (`open` / `in_progress`) and no active
-//!   blockers; blocking is one-step, not transitive, so cycles cannot hang
-//!   the computation (members of a blocking cycle are simply all blocked)
+//! - **ready** = awake (see [`is_awake`]) and no active blockers; blocking
+//!   is one-step, not transitive, so cycles cannot hang the computation
+//!   (members of a blocking cycle are simply all blocked)
+//! - **wake** is read-time: a `deferred` strand whose `defer_until` has
+//!   passed counts as awake without anything rewriting the document — no
+//!   scheduler, no write-on-read (design decision D2: braid never manages
+//!   a daemon)
 
 use std::collections::BTreeSet;
 
-use crate::schema::{Issue, Skein};
+use crate::schema::{Issue, Skein, Status};
+use crate::time::is_after;
 
 /// The issues actively blocking `issue`, in dependency-key order.
 pub fn active_blockers<'t>(skein: &'t Skein, issue: &Issue) -> Vec<&'t Issue> {
@@ -27,26 +32,45 @@ pub fn active_blockers<'t>(skein: &'t Skein, issue: &Issue) -> Vec<&'t Issue> {
         .collect()
 }
 
-/// Issues that can be worked on now: active status, no active blockers.
+/// Whether `issue` counts as workable at instant `now` (RFC 3339): an
+/// active status, or `deferred` with a `defer_until` that has passed
+/// (inclusive: awake from the wake instant on). A dateless deferred
+/// strand sleeps until an explicit undefer; an unparseable `defer_until`
+/// is conservative and never wakes.
+pub fn is_awake(issue: &Issue, now: &str) -> bool {
+    if issue.status.is_active() {
+        return true;
+    }
+    if issue.status != Status::Deferred {
+        return false;
+    }
+    match issue.defer_until.as_deref() {
+        // awake iff until <= now; is_after returns None on parse failure
+        Some(until) => matches!(is_after(until, now), Some(false)),
+        None => false,
+    }
+}
+
+/// Issues that can be worked on at `now`: awake, no active blockers.
 /// Sorted by (priority, created_at, id).
-pub fn ready_issues(skein: &Skein) -> Vec<&Issue> {
+pub fn ready_issues<'t>(skein: &'t Skein, now: &str) -> Vec<&'t Issue> {
     let mut out: Vec<&Issue> = skein
         .issues
         .values()
-        .filter(|i| i.status.is_active())
+        .filter(|i| is_awake(i, now))
         .filter(|i| active_blockers(skein, i).is_empty())
         .collect();
     sort_for_listing(&mut out);
     out
 }
 
-/// Issues with active status that are blocked, each with its blockers.
+/// Awake issues that are blocked, each with its blockers.
 /// Sorted by (priority, created_at, id).
-pub fn blocked_issues(skein: &Skein) -> Vec<(&Issue, Vec<&Issue>)> {
+pub fn blocked_issues<'t>(skein: &'t Skein, now: &str) -> Vec<(&'t Issue, Vec<&'t Issue>)> {
     let mut with_blockers: Vec<(&Issue, Vec<&Issue>)> = skein
         .issues
         .values()
-        .filter(|i| i.status.is_active())
+        .filter(|i| is_awake(i, now))
         .map(|i| (i, active_blockers(skein, i)))
         .filter(|(_, blockers)| !blockers.is_empty())
         .collect();

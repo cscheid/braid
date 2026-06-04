@@ -196,6 +196,7 @@ fn convert(raw: RawIssue, now: &str) -> Issue {
         updated_at: raw.updated_at.unwrap_or_else(|| now.to_string()),
         closed_at: raw.closed_at,
         close_reason: raw.close_reason,
+        defer_until: None, // wired to RawIssue in the import phase (plan phase 3)
         external_ref: raw.external_ref,
         labels: raw.labels.into_iter().collect(),
         dependencies,

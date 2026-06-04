@@ -87,6 +87,7 @@ fn minimal_issue(id: &str) -> Issue {
         updated_at: "2026-06-03T10:00:00.000000Z".into(),
         closed_at: None,
         close_reason: None,
+        defer_until: None,
         external_ref: None,
         labels: BTreeSet::new(),
         dependencies: BTreeMap::new(),
@@ -129,6 +130,7 @@ fn full_issue(id: &str) -> Issue {
         updated_at: "2026-06-03T11:00:00.000000Z".into(),
         closed_at: Some("2026-06-03T12:00:00.000000Z".into()),
         close_reason: Some("done, verified".into()),
+        defer_until: Some("2026-07-01T00:00:00.000000Z".into()),
         external_ref: Some("https://github.com/example/repo/issues/42".into()),
         labels: BTreeSet::from(["cargo".to_string(), "deps".to_string()]),
         dependencies: BTreeMap::from([(dep.key(), dep), (dep2.key(), dep2)]),
@@ -269,6 +271,30 @@ fn optional_text_field_can_be_added_and_removed() {
         .unwrap();
     let back = hydrate(&doc).unwrap();
     assert_eq!(back.issues["br-min001"].notes, None);
+}
+
+#[test]
+fn defer_until_can_be_set_and_cleared() {
+    let mut issue = minimal_issue("br-min001");
+    let mut doc = materialize(&skein_with(vec![issue.clone()]));
+
+    // Defer with a wake date.
+    issue.status = Status::Deferred;
+    issue.defer_until = Some("2026-07-01T00:00:00.000000Z".into());
+    doc.transact(|tx| reconcile_issue(tx, &issue))
+        .map_err(|f| f.error)
+        .unwrap();
+    let back = hydrate(&doc).unwrap();
+    assert_eq!(back.issues["br-min001"], issue);
+
+    // Undefer: status back to open, date cleared.
+    issue.status = Status::Open;
+    issue.defer_until = None;
+    doc.transact(|tx| reconcile_issue(tx, &issue))
+        .map_err(|f| f.error)
+        .unwrap();
+    let back = hydrate(&doc).unwrap();
+    assert_eq!(back.issues["br-min001"], issue);
 }
 
 #[test]

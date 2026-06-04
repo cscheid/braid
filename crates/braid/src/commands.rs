@@ -426,6 +426,7 @@ pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
         updated_at: now,
         closed_at: None,
         close_reason: None,
+        defer_until: None,
         external_ref: None,
         labels: opts.labels.into_iter().collect::<BTreeSet<_>>(),
         dependencies: BTreeMap::new(),
@@ -927,7 +928,7 @@ pub async fn ready(cwd: &Path, json: bool) -> Result<()> {
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let ready = ready_issues(&skein);
+    let ready = ready_issues(&skein, &now_rfc3339());
     if json {
         println!("{}", serde_json::to_string_pretty(&ready)?);
     } else {
@@ -941,7 +942,7 @@ pub async fn blocked(cwd: &Path, json: bool) -> Result<()> {
     let skein = opened.doc.with_document(|d| hydrate(d))?;
     opened.close().await;
 
-    let blocked = blocked_issues(&skein);
+    let blocked = blocked_issues(&skein, &now_rfc3339());
     if json {
         let rows: Vec<serde_json::Value> = blocked
             .iter()

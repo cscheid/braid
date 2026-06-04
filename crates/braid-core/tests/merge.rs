@@ -47,6 +47,7 @@ fn issue(id: &str) -> Issue {
         updated_at: "2026-06-03T10:00:00.000000Z".into(),
         closed_at: None,
         close_reason: None,
+        defer_until: None,
         external_ref: None,
         labels: BTreeSet::new(),
         dependencies: BTreeMap::new(),

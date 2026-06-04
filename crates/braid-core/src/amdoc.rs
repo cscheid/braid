@@ -200,6 +200,7 @@ pub fn reconcile_issue<T: Transactable>(tx: &mut T, issue: &Issue) -> Result<(),
     put_opt_str_if_changed(tx, &obj, "assignee", issue.assignee.as_deref())?;
     put_opt_str_if_changed(tx, &obj, "closed_at", issue.closed_at.as_deref())?;
     put_opt_str_if_changed(tx, &obj, "close_reason", issue.close_reason.as_deref())?;
+    put_opt_str_if_changed(tx, &obj, "defer_until", issue.defer_until.as_deref())?;
     put_opt_str_if_changed(tx, &obj, "external_ref", issue.external_ref.as_deref())?;
 
     reconcile_text(tx, &obj, "description", issue.description.as_deref())?;
@@ -515,6 +516,7 @@ fn hydrate_issue<R: ReadDoc>(doc: &R, obj: &ObjId, path: &str) -> Result<Issue, 
         updated_at: req_str(doc, obj, "updated_at", path)?,
         closed_at: opt_str(doc, obj, "closed_at", path)?,
         close_reason: opt_str(doc, obj, "close_reason", path)?,
+        defer_until: opt_str(doc, obj, "defer_until", path)?,
         external_ref: opt_str(doc, obj, "external_ref", path)?,
         labels,
         dependencies,

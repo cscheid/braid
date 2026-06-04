@@ -77,6 +77,12 @@ pub struct Issue {
     pub closed_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub close_reason: Option<String>,
+    /// RFC 3339 wake time, meaningful only while `status` is `deferred`:
+    /// once it passes, the strand counts as ready again (computed at read
+    /// time — see `domain::is_awake`; nothing rewrites the document).
+    /// Absent on a deferred strand = sleeps until an explicit undefer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defer_until: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_ref: Option<String>,
     /// Map-as-set in the document; a sorted set here.
@@ -392,6 +398,7 @@ mod tests {
             updated_at: "2026-06-03T00:00:00Z".into(),
             closed_at: None,
             close_reason: None,
+            defer_until: None,
             external_ref: None,
             labels: BTreeSet::new(),
             dependencies: BTreeMap::new(),
@@ -403,6 +410,7 @@ mod tests {
         // empty collections and None optionals are omitted
         assert!(json.get("labels").is_none());
         assert!(json.get("description").is_none());
+        assert!(json.get("defer_until").is_none());
 
         let back: Issue = serde_json::from_value(json).unwrap();
         assert_eq!(back, issue);

@@ -4,10 +4,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use braid_core::domain::{
-    active_blockers, blocked_issues, dependency_cycles, dependents_of, open_children,
-    ready_issues,
+    active_blockers, blocked_issues, dependency_cycles, dependents_of, is_awake,
+    open_children, ready_issues,
 };
 use braid_core::schema::*;
+
+/// The fixed instant "now" for wake computations in these tests.
+const NOW: &str = "2026-06-04T12:00:00.000000Z";
 
 fn issue(id: &str) -> Issue {
     Issue {
@@ -26,6 +29,7 @@ fn issue(id: &str) -> Issue {
         updated_at: "2026-06-03T10:00:00.000000Z".into(),
         closed_at: None,
         close_reason: None,
+        defer_until: None,
         external_ref: None,
         labels: BTreeSet::new(),
         dependencies: BTreeMap::new(),
@@ -69,16 +73,16 @@ fn ids(issues: &[&Issue]) -> Vec<String> {
 #[test]
 fn open_issue_with_no_deps_is_ready() {
     let t = skein(vec![issue("br-a")]);
-    assert_eq!(ids(&ready_issues(&t)), ["br-a"]);
-    assert!(blocked_issues(&t).is_empty());
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-a"]);
+    assert!(blocked_issues(&t, NOW).is_empty());
 }
 
 #[test]
 fn blocks_edge_blocks_until_target_closes() {
     let blocked = with_dep(issue("br-a"), "br-b", DependencyType::Blocks);
     let t = skein(vec![blocked.clone(), issue("br-b")]);
-    assert_eq!(ids(&ready_issues(&t)), ["br-b"]);
-    let blocked_list = blocked_issues(&t);
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-b"]);
+    let blocked_list = blocked_issues(&t, NOW);
     assert_eq!(blocked_list.len(), 1);
     assert_eq!(blocked_list[0].0.id, "br-a");
     assert_eq!(ids(&blocked_list[0].1), ["br-b"]);
@@ -87,7 +91,7 @@ fn blocks_edge_blocks_until_target_closes() {
     let mut closer = issue("br-b");
     closer.status = Status::Closed;
     let t = skein(vec![blocked, closer]);
-    assert_eq!(ids(&ready_issues(&t)), ["br-a"]);
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-a"]);
 }
 
 #[test]
@@ -95,7 +99,7 @@ fn waits_for_and_conditional_blocks_also_block() {
     for ty in [DependencyType::WaitsFor, DependencyType::ConditionalBlocks] {
         let a = with_dep(issue("br-a"), "br-b", ty);
         let t = skein(vec![a, issue("br-b")]);
-        assert_eq!(ids(&ready_issues(&t)), ["br-b"]);
+        assert_eq!(ids(&ready_issues(&t, NOW)), ["br-b"]);
     }
 }
 
@@ -106,7 +110,7 @@ fn parent_child_does_not_block_the_child() {
     let mut epic = issue("br-epic");
     epic.issue_type = IssueType::Epic;
     let t = skein(vec![child, epic]);
-    let mut ready = ids(&ready_issues(&t));
+    let mut ready = ids(&ready_issues(&t, NOW));
     ready.sort();
     assert_eq!(ready, ["br-child", "br-epic"], "both child and epic must be ready");
 }
@@ -135,7 +139,7 @@ fn non_blocking_edge_types_never_block() {
     ] {
         let a = with_dep(issue("br-a"), "br-b", ty.clone());
         let t = skein(vec![a, issue("br-b")]);
-        assert_eq!(ids(&ready_issues(&t)), ["br-a", "br-b"], "type {ty:?} must not block");
+        assert_eq!(ids(&ready_issues(&t, NOW)), ["br-a", "br-b"], "type {ty:?} must not block");
     }
 }
 
@@ -143,7 +147,7 @@ fn non_blocking_edge_types_never_block() {
 fn dangling_edges_do_not_block() {
     let a = with_dep(issue("br-a"), "br-ghost", DependencyType::Blocks);
     let t = skein(vec![a]);
-    assert_eq!(ids(&ready_issues(&t)), ["br-a"]);
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-a"]);
 }
 
 #[test]
@@ -158,10 +162,10 @@ fn only_active_statuses_appear_in_ready_or_blocked() {
     manually_blocked.status = Status::Blocked;
 
     let t = skein(vec![closed, deferred, in_progress, manually_blocked]);
-    assert_eq!(ids(&ready_issues(&t)), ["br-inprog"]);
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-inprog"]);
     // status "blocked" (manual) is not active, so it doesn't show in
     // blocked_issues either — that listing is for dependency-blocked work.
-    assert!(blocked_issues(&t).is_empty());
+    assert!(blocked_issues(&t, NOW).is_empty());
 }
 
 #[test]
@@ -178,7 +182,7 @@ fn ready_sorts_by_priority_then_created_at() {
     mid_new.created_at = "2026-06-01T00:00:00.000000Z".into();
 
     let t = skein(vec![low, high, mid_new, mid_old]);
-    assert_eq!(ids(&ready_issues(&t)), ["br-high", "br-mid-old", "br-mid-new", "br-low"]);
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-high", "br-mid-old", "br-mid-new", "br-low"]);
 }
 
 #[test]
@@ -234,8 +238,8 @@ fn cycle_members_are_all_blocked_not_hanging() {
     let a = with_dep(issue("br-a"), "br-b", DependencyType::Blocks);
     let b = with_dep(issue("br-b"), "br-a", DependencyType::Blocks);
     let t = skein(vec![a, b]);
-    assert!(ready_issues(&t).is_empty());
-    assert_eq!(blocked_issues(&t).len(), 2);
+    assert!(ready_issues(&t, NOW).is_empty());
+    assert_eq!(blocked_issues(&t, NOW).len(), 2);
 }
 
 #[test]
@@ -245,6 +249,96 @@ fn dependents_lists_reverse_edges() {
     let t = skein(vec![a, b, issue("br-c")]);
     assert_eq!(ids(&dependents_of(&t, "br-c")), ["br-a", "br-b"]);
     assert!(dependents_of(&t, "br-a").is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// defer / read-time wake
+// ---------------------------------------------------------------------------
+
+fn deferred(id: &str, until: Option<&str>) -> Issue {
+    let mut i = issue(id);
+    i.status = Status::Deferred;
+    i.defer_until = until.map(String::from);
+    i
+}
+
+#[test]
+fn deferred_with_future_date_stays_excluded() {
+    let t = skein(vec![deferred("br-later", Some("2026-07-01T00:00:00.000000Z"))]);
+    assert!(ready_issues(&t, NOW).is_empty());
+    assert!(blocked_issues(&t, NOW).is_empty());
+}
+
+#[test]
+fn deferred_with_past_date_wakes_into_ready() {
+    let t = skein(vec![deferred("br-due", Some("2026-06-01T00:00:00.000000Z"))]);
+    let ready = ready_issues(&t, NOW);
+    assert_eq!(ids(&ready), ["br-due"]);
+    // wake is computed, not written: the strand still reads as deferred
+    assert_eq!(ready[0].status, Status::Deferred);
+}
+
+#[test]
+fn defer_until_equal_to_now_is_awake() {
+    // "wakes at T" means awake from T on, inclusive
+    let t = skein(vec![deferred("br-exact", Some(NOW))]);
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-exact"]);
+}
+
+#[test]
+fn deferred_without_date_never_wakes() {
+    let t = skein(vec![deferred("br-parked", None)]);
+    assert!(ready_issues(&t, NOW).is_empty());
+}
+
+#[test]
+fn deferred_with_unparseable_date_never_wakes() {
+    // conservative: a garbled timestamp keeps the strand asleep rather
+    // than surfacing it
+    let t = skein(vec![deferred("br-garbled", Some("not a timestamp"))]);
+    assert!(ready_issues(&t, NOW).is_empty());
+}
+
+#[test]
+fn awake_deferred_with_active_blocker_is_blocked_not_ready() {
+    let woken = with_dep(
+        deferred("br-due", Some("2026-06-01T00:00:00.000000Z")),
+        "br-blocker",
+        DependencyType::Blocks,
+    );
+    let t = skein(vec![woken, issue("br-blocker")]);
+    assert_eq!(ids(&ready_issues(&t, NOW)), ["br-blocker"]);
+    let blocked = blocked_issues(&t, NOW);
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].0.id, "br-due");
+    assert_eq!(ids(&blocked[0].1), ["br-blocker"]);
+}
+
+#[test]
+fn deferred_still_blocks_its_dependents() {
+    // deferral pauses the strand, not its obligations: only `closed`
+    // releases dependents (is_terminal is unchanged)
+    let a = with_dep(issue("br-a"), "br-asleep", DependencyType::Blocks);
+    let t = skein(vec![a, deferred("br-asleep", Some("2026-07-01T00:00:00.000000Z"))]);
+    assert!(ready_issues(&t, NOW).is_empty());
+    let blocked = blocked_issues(&t, NOW);
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(blocked[0].0.id, "br-a");
+}
+
+#[test]
+fn is_awake_covers_all_statuses() {
+    assert!(is_awake(&issue("br-open"), NOW));
+    let mut inprog = issue("br-p");
+    inprog.status = Status::InProgress;
+    assert!(is_awake(&inprog, NOW));
+    for status in [Status::Blocked, Status::Closed, Status::Other("paused".into())] {
+        let mut i = issue("br-x");
+        i.status = status.clone();
+        // defer_until only means something on a deferred strand
+        i.defer_until = Some("2026-06-01T00:00:00.000000Z".into());
+        assert!(!is_awake(&i, NOW), "status {status:?} must not be awake");
+    }
 }
 
 #[test]
