@@ -71,30 +71,44 @@ manifest auto-updated on release).
 - [ ] Update br-9b5rxe75 with the above; close it (code is portable + proven
       by CI).
 
-## Phase 2 — release artifact (not started)
+## Phase 2 — release artifact (done; exercised at next tag)
 
-- [ ] Add `x86_64-pc-windows-msvc` to the `release.yml` build matrix; the
-      runner is `windows-latest`. Package `braid.exe` as
-      `braid-<version>-windows_amd64.zip` (zip is the Windows convention and
-      what Scoop/WinGet expect). Tar packaging on the unix targets stays.
-- [ ] Sign + checksum like the other artifacts (minisign Ed25519 runs on
-      Windows; or sign in the combine job). Update the release notes table
-      and the asset-count check (currently asserts 13 assets → becomes the
-      4-tarball + 1-zip set with their `.sha256`/`.minisig`).
-- [ ] Keep the artifact-naming contract aligned with `install.sh` and any
-      Windows installer.
+- [x] Added `windows_amd64` / `x86_64-pc-windows-msvc` (`windows-latest`) to
+      the `release.yml` matrix with a per-entry `ext` (`tar.gz` vs `zip`).
+- [x] Windows packs `braid.exe` into `braid-<version>-windows_amd64.zip`
+      (pwsh `Compress-Archive`); its `.sha256` is written GNU-format
+      (`<lowercase-hash>  <file>`, LF, no BOM) so the ubuntu combine job's
+      `sha256sum -c` accepts it next to the unix lines.
+- [x] Shared steps (version check, minisign install, sign) run via
+      `shell: bash` (Git Bash on the Windows runner); minisign installed via
+      `choco`. Signing + the pinned-key verify are identical across OSes.
+- [x] Combine-job presence check + release-notes table include Windows; the
+      `braid-release` skill's asset count updated 13 → 16.
+- Note: the release build path only runs on a tag, so it's **validated at
+  the next release**. The risky bits (zip + checksum format) are mirrored
+  from the proven unix path and additionally exercised by the install.ps1
+  CI smoke test below.
 
-## Phase 3 — easy install (not started)
+## Phase 3 — easy install
 
-- [ ] **Scoop manifest** (`packaging/scoop/braid.json`) pointing at the
-      release `.zip` + sha256; host in a bucket (e.g. `cscheid/scoop-braid`)
-      and auto-update on release (beads' `update-package-manifests.yml` is
-      the model). Add a test analogous to `tests/installer.rs` if feasible.
-- [ ] **PowerShell installer** (`install.ps1`): resolve latest release,
-      download the zip, verify SHA256 (`Get-FileHash`), extract, add to
-      PATH. minisign verification optional (baseline is SHA256).
-- [ ] Docs: README install section + a note in `agents-info.md`.
+- [x] **PowerShell installer** (`install.ps1`): resolves the latest release
+      (or `-Version`), downloads the zip, verifies SHA-256 (fetching the
+      published `.sha256` or a passed `-Checksum`), extracts `braid.exe` to
+      `%USERPROFILE%\.local\bin` (`-Dest` to override), and prints the PATH
+      line. `-ArtifactUrl` accepts a local path for offline testing.
+- [x] **CI smoke test** (windows-latest, in `ci.yml`): zip the just-built
+      `braid.exe`, install it via `install.ps1` from that local artifact
+      with checksum verification, assert `braid.exe --version`, and assert a
+      bad checksum is rejected. Validates the installer without a release.
+- [x] **Scoop manifest** (`packaging/scoop/braid.json`) + README —
+      groundwork: autoupdate wired to the release URL + `.sha256`, but
+      version/url/hash are placeholders until the first Windows release
+      exists (and Scoop needs a bucket repo to be user-installable). See
+      `packaging/scoop/README.md`.
+- [x] Docs: README Windows section; release notes include the PowerShell
+      one-liner.
 
-Deferred: WinGet manifest (broadest reach, later); `aarch64-pc-windows-msvc`
-(low demand); Authenticode code-signing (needs a paid cert — document the
-SmartScreen expectation instead).
+Deferred: a release-time workflow that fills + commits the Scoop manifest
+(beads' `update-package-manifests.yml` model) and a `cscheid/scoop-braid`
+bucket; WinGet manifest; `aarch64-pc-windows-msvc`; Authenticode signing
+(needs a paid cert — document the SmartScreen expectation instead).
