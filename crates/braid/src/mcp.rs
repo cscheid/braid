@@ -189,6 +189,24 @@ fn specs() -> Vec<ToolSpec> {
             },
         },
         ToolSpec {
+            name: "braid_dep_tree",
+            description: "Recursive parent-child descendant tree of a strand (epic → \
+                          subtasks). Returns a nested node {id, title, status, \
+                          dep_type, cycle, children}; closed children are included \
+                          and parent-child cycles are broken (cycle: true, not \
+                          expanded).",
+            tier: Tier::Query,
+            idempotent: true,
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                    "required": ["id"],
+                    "additionalProperties": false
+                })
+            },
+        },
+        ToolSpec {
             name: "braid_dep_cycles",
             description: "Report dependency cycles among blocking and parent-child edges.",
             tier: Tier::Query,
@@ -556,6 +574,14 @@ impl BraidServer {
                 }
                 let p: P = serde_json::from_value(args)?;
                 Ok(serde_json::to_value(self.session.dep_list(&p.id)?)?)
+            }
+            "braid_dep_tree" => {
+                #[derive(Deserialize)]
+                struct P {
+                    id: String,
+                }
+                let p: P = serde_json::from_value(args)?;
+                Ok(serde_json::to_value(self.session.dep_tree(&p.id)?)?)
             }
             "braid_dep_cycles" => Ok(json!({"cycles": self.session.dep_cycles()?})),
             "braid_export" => Ok(json!({"jsonl": self.session.export_jsonl()?})),

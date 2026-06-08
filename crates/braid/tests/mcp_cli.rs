@@ -216,6 +216,7 @@ const DEFAULT_TOOLS: &[&str] = &[
     "braid_dep_cycles",
     "braid_dep_list",
     "braid_dep_remove",
+    "braid_dep_tree",
     "braid_export",
     "braid_list",
     "braid_ready",
@@ -272,6 +273,7 @@ async fn read_only_serves_only_queries_and_refuses_calls() {
             "braid_blocked",
             "braid_dep_cycles",
             "braid_dep_list",
+            "braid_dep_tree",
             "braid_export",
             "braid_list",
             "braid_ready",
@@ -381,6 +383,30 @@ async fn agent_workflow_end_to_end() {
     // errors are tool-level, not crashes: unknown id
     let err = client.call_expect_error("braid_show", json!({"id": "zzz-nope"})).await;
     assert!(err.contains("no issue"), "{err}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dep_tree_returns_nested_descendants() {
+    let tmp = tempfile::tempdir().unwrap();
+    let skein = Skein::new(tmp.path(), "a");
+    skein.init(DEAD_SERVER);
+    let mut client = McpClient::spawn(&skein, &[]).await;
+
+    let epic = client.call("braid_create", json!({"title": "Epic", "type": "epic"})).await;
+    let epic_id = epic["id"].as_str().unwrap().to_string();
+    let child = client
+        .call(
+            "braid_create",
+            json!({"title": "Child", "deps": [format!("parent-child:{epic_id}")]}),
+        )
+        .await;
+    let child_id = child["id"].as_str().unwrap().to_string();
+
+    let tree = client.call("braid_dep_tree", json!({"id": epic_id})).await;
+    assert_eq!(tree["id"], epic_id.as_str());
+    assert_eq!(tree["children"][0]["id"], child_id.as_str());
+    assert_eq!(tree["children"][0]["dep_type"], "parent-child");
+    assert_eq!(tree["children"][0]["cycle"], false);
 }
 
 #[tokio::test(flavor = "multi_thread")]

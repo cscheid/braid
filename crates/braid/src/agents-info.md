@@ -71,6 +71,7 @@ braid create "Fix the frobnicator" \
 | `braid dep add <id> <target> [--type T]` | `<id>` depends on `<target>`; default type `blocks` |
 | `braid dep remove <id> <target> [--type T]` | remove dependency |
 | `braid dep list <id>` | dependencies in both directions |
+| `braid dep tree <id> [--json]` | recursive parent-child descendant tree (epic → subtasks); each node shows status, closed children included, cycles broken with a `(cycle)` marker |
 | `braid dep cycles` | report dependency cycles |
 | `braid sync` | force a sync; fails when the server is unreachable |
 | `braid secret` | print the full doc id + sync server (paste-ready TOML). **Grants read/write access** — only run when a human asks |

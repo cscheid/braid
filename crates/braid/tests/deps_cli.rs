@@ -174,6 +174,62 @@ fn dep_add_validates_targets_and_self_edges() {
 }
 
 #[test]
+fn dep_tree_renders_recursive_parent_child() {
+    let (_tmp, t) = Skein::new();
+    let a = t.create(&["Epic A", "--type", "epic"]);
+    let b = t.create(&["Task B", "--deps", &format!("parent-child:{a}")]);
+    let c = t.create(&["Task C", "--deps", &format!("parent-child:{a}")]);
+    let d = t.create(&["Task D", "--deps", &format!("parent-child:{c}")]);
+
+    // text tree: A at depth 0, B/C indented under it, D under C
+    let out = t.braid().args(["dep", "tree", &a]).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert!(lines[0].starts_with(&a), "root first: {text}");
+    // B and C are at one level of indent; D is two levels under C
+    assert!(text.contains(&format!("  {b}")), "B indented under A: {text}");
+    assert!(text.contains(&format!("  {c}")), "C indented under A: {text}");
+    assert!(text.contains(&format!("    {d}")), "D indented under C: {text}");
+    assert!(text.contains("[open]"), "statuses shown: {text}");
+
+    // --json: nested structure rooted at A
+    let out = t.braid().args(["dep", "tree", &a, "--json"]).assert().success();
+    let tree: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(tree["id"], a.as_str());
+    let kids: Vec<&str> =
+        tree["children"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect();
+    assert!(kids.contains(&b.as_str()) && kids.contains(&c.as_str()));
+    let c_node =
+        tree["children"].as_array().unwrap().iter().find(|n| n["id"] == c.as_str()).unwrap();
+    assert_eq!(c_node["children"][0]["id"], d.as_str());
+    assert_eq!(c_node["children"][0]["dep_type"], "parent-child");
+}
+
+#[test]
+fn dep_tree_breaks_cycles() {
+    let (_tmp, t) = Skein::new();
+    let a = t.create(&["A"]);
+    let b = t.create(&["B", "--deps", &format!("parent-child:{a}")]); // B child of A
+    // close the loop: A becomes a child of B
+    t.braid().args(["dep", "add", &a, &b, "--type", "parent-child"]).assert().success();
+
+    // must terminate (not recurse forever) and mark the cycle
+    let out = t.braid().args(["dep", "tree", &a]).assert().success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("(cycle)"), "cycle marked: {text}");
+
+    let out = t.braid().args(["dep", "tree", &a, "--json"]).assert().success();
+    let tree: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    // A -> B -> A(cycle)
+    let b_node = &tree["children"][0];
+    assert_eq!(b_node["id"], b.as_str());
+    let a_again = &b_node["children"][0];
+    assert_eq!(a_again["id"], a.as_str());
+    assert_eq!(a_again["cycle"], true);
+    assert!(a_again["children"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn dep_add_warns_on_cycle_but_allows_it() {
     let (_tmp, t) = Skein::new();
     let a = t.create(&["A"]);

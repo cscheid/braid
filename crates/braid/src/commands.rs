@@ -702,6 +702,35 @@ pub async fn dep_cycles(cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+pub async fn dep_tree(cwd: &Path, query: &str, json: bool) -> Result<()> {
+    let session = Session::open(cwd).await?;
+    let tree = session.dep_tree(query);
+    session.shutdown().await;
+    let tree = tree?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&tree)?);
+    } else {
+        let mut out = String::new();
+        format_dep_tree(&tree, 0, &mut out);
+        print!("{out}");
+    }
+    Ok(())
+}
+
+/// Render a [`DepTreeNode`] as an indented text tree: two spaces per depth,
+/// each line `<id>  <title>  [<status>]`, with a trailing `(cycle)` on a
+/// node that repeats an ancestor.
+fn format_dep_tree(node: &braid_core::domain::DepTreeNode, depth: usize, out: &mut String) {
+    use std::fmt::Write;
+    let indent = "  ".repeat(depth);
+    let cycle = if node.cycle { "  (cycle)" } else { "" };
+    let _ = writeln!(out, "{indent}{}  {}  [{}]{cycle}", node.id, node.title, node.status);
+    for child in &node.children {
+        format_dep_tree(child, depth + 1, out);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ready / blocked
 // ---------------------------------------------------------------------------

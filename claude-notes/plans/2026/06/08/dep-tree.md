@@ -96,36 +96,46 @@ aligned. **Decided (Carlos, 2026-06-08): include it in 0.3.0**, document in
 
 ## Test plan (write first — TDD)
 
-**Phase 1 — core builder unit tests (`domain.rs`):**
+**Phase 1 — core builder unit tests (`domain.rs`):** all in `domain::tests`.
 
-- [ ] Skein: epic A with children B, C (each `parent-child` → A); C has
-      child D (`parent-child` → C). `dep_tree(A)` yields A→[B, C→[D]] with
-      correct nesting and statuses.
-- [ ] Mixed statuses: a closed child still appears, marked `[closed]`.
-- [ ] Cycle: A blocks B, B blocks A (or a parent-child cycle) terminates
-      with a `cycle` flag set and no infinite recursion.
-- [ ] Diamond: B and C both parent D — D rendered per the chosen
-      repeat-handling rule (documented), no double full-expansion.
-- [ ] Leaf with no children → single node, empty `children`.
+- [x] Epic A with children B, C (each `parent-child` → A); C has child D.
+      `dep_tree(A)` yields A→[B, C→[D]], siblings id-sorted, statuses set.
+      [`dep_tree_builds_nested_descendants`]
+- [x] Mixed statuses: a closed child still appears, status `closed`.
+      [`dep_tree_includes_closed_children`]
+- [x] Parent-child cycle (A child of B, B child of A) terminates with a
+      `cycle: true` flag and is not expanded.
+      [`dep_tree_breaks_parent_child_cycle`]
+- [x] Diamond: B and C both parent D — D is shown and expanded under each
+      (only true ancestor cycles are cut; documented).
+      [`dep_tree_expands_shared_node_in_each_location`]
+- [x] Leaf → single node, empty `children`. [`dep_tree_leaf_has_no_children`]
 
-**Phase 2 — CLI / JSON shape:**
+**Phase 2 — CLI / JSON shape (`deps_cli.rs`):**
 
-- [ ] `dep tree A` text output: indentation + status markers as specified.
-- [ ] `dep tree A --json` matches the documented nested schema (stable
-      field names); snapshot or structural assertion.
-- [ ] Unknown / ambiguous id fragment errors like `show`/`dep list`.
+- [x] `dep tree A` text: 2-space-per-depth indent + `[status]` markers.
+      [`dep_tree_renders_recursive_parent_child`]
+- [x] `dep tree A --json` nested shape (id/children/dep_type) asserted
+      structurally. [same test]
+- [x] Cycle renders `(cycle)` in text and `cycle: true` in JSON, no hang.
+      [`dep_tree_breaks_cycles`]
+- [x] MCP `braid_dep_tree` returns the nested node.
+      [`dep_tree_returns_nested_descendants`]
+- Root resolution reuses `resolve_issue`, so unknown/ambiguous fragments
+  error exactly like `show`/`dep list` (no new test — shared code path).
 
 ## Work items
 
-- [ ] Phase 1 + 2 tests written and red.
-- [ ] `TreeNode` + `dep_tree` builder in `braid-core::domain` (cycle-safe).
-- [ ] `Session::dep_tree` in `ops.rs`.
-- [ ] `dep_tree` printer (text + `--json`) in `commands.rs`.
-- [ ] `DepCmd::Tree` wired in `main.rs`.
-- [ ] `braid_dep_tree` MCP tool + `docs/mcp.md` row.
-- [ ] `agents-info.md`: add `dep tree` to the command reference table.
-- [ ] `dep --help` / subcommand doc string.
-- [ ] `cargo xtask ci` green (incl. `docs_drift` for the new subcommand).
+- [x] Phase 1 + 2 tests written and red.
+- [x] `DepTreeNode` + `dep_tree` builder + `child_strands` in
+      `braid-core::domain` (cycle-safe, parent-child only).
+- [x] `Session::dep_tree` in `ops.rs`.
+- [x] `dep_tree` printer (text + `--json`) in `commands.rs`.
+- [x] `DepCmd::Tree` wired in `main.rs`.
+- [x] `braid_dep_tree` MCP tool + `docs/mcp.md` row + `docs_drift` guard.
+- [x] `agents-info.md`: `dep tree` row in the command reference table.
+- [x] `dep tree` subcommand doc string (clap).
+- [x] `cargo xtask ci` green.
 
 ## Docs to touch (same commit)
 

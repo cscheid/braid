@@ -59,7 +59,7 @@ chain); there is deliberately no per-call author parameter.
 
 | launch | tools served |
 |---|---|
-| `braid mcp --read-only` | queries only: ready, blocked, list, show, search, dep_list, dep_cycles, export |
+| `braid mcp --read-only` | queries only: ready, blocked, list, show, search, dep_list, dep_tree, dep_cycles, export |
 | `braid mcp` (default) | queries + reversible mutations: create, update, close, reopen, defer, undefer, comment, dep_add, dep_remove |
 | `braid mcp --enable-destructive` | everything + `braid_delete` and `braid_import` (**no undo**: a delete wins over concurrent edits; import overwrites same-id strands) |
 

@@ -72,6 +72,7 @@ fn every_mcp_tool_is_documented_in_docs_mcp_md() {
         "show",
         "search",
         "dep_list",
+        "dep_tree",
         "dep_cycles",
         "export",
         "create",

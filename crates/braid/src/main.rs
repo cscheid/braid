@@ -242,6 +242,12 @@ enum DepCmd {
     },
     /// List dependencies of an issue, both directions
     List { issue: String },
+    /// Recursive parent-child descendant tree of an issue (epic → subtasks)
+    Tree {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Report dependency cycles (blocking + parent-child edges)
     Cycles,
 }
@@ -345,6 +351,7 @@ async fn main() {
                 commands::dep_remove(&cwd, &issue, &target, dep_type).await
             }
             DepCmd::List { issue } => commands::dep_list(&cwd, &issue).await,
+            DepCmd::Tree { issue, json } => commands::dep_tree(&cwd, &issue, json).await,
             DepCmd::Cycles => commands::dep_cycles(&cwd).await,
         },
         Cmd::Ready { label, assignee, issue_type, json } => {

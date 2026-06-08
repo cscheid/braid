@@ -18,8 +18,8 @@ use std::path::Path;
 use anyhow::{Result, anyhow, bail};
 use braid_core::amdoc::{delete_issue, hydrate, hydrate_metadata, reconcile_issue};
 use braid_core::domain::{
-    ListFilter, blocked_issues, dependency_cycles, dependents_of, listing_order, open_children,
-    ready_issues,
+    DepTreeNode, ListFilter, blocked_issues, dep_tree, dependency_cycles, dependents_of,
+    listing_order, open_children, ready_issues,
 };
 use braid_core::id::{new_comment_id, new_issue_id};
 use braid_core::schema::{Comment, Dependency, DependencyType, Issue, IssueType, Skein, Status};
@@ -436,6 +436,15 @@ impl Session {
     pub fn dep_cycles(&self) -> Result<Vec<Vec<String>>> {
         let skein = self.hydrate()?;
         Ok(dependency_cycles(&skein))
+    }
+
+    /// The recursive `parent-child` descendant tree rooted at `query`. The
+    /// root is resolved like `show`/`dep list` (id fragments work); cycles
+    /// are broken in [`dep_tree`].
+    pub fn dep_tree(&self, query: &str) -> Result<DepTreeNode> {
+        let skein = self.hydrate()?;
+        let root = resolve_issue(&skein, query)?;
+        Ok(dep_tree(&skein, &root.id))
     }
 
     /// All strands as JSONL (id-sorted), conforming to
