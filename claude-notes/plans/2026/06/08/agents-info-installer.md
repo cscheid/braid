@@ -104,33 +104,42 @@ Install logic:
 
 ## Test plan (write first — TDD)
 
-Pure splice fn (no I/O):
+Pure splice fn (`commands::tests`, no I/O):
 
-- [ ] Empty input → output is exactly the managed block (markers + body).
-- [ ] Input with an existing managed block → block replaced; text before
-      and after the markers preserved byte-for-byte.
-- [ ] Input with trailing user content after END → preserved on re-install.
-- [ ] Input without markers → block appended, prior content intact.
-- [ ] Malformed markers (BEGIN, no END) → error.
+- [x] Empty input → output is exactly the managed block + trailing newline.
+      [`empty_input_yields_just_the_block`]
+- [x] Existing block → replaced; text before and after preserved
+      byte-for-byte, exactly one block.
+      [`existing_block_is_replaced_preserving_surroundings`]
+- [x] Re-install is idempotent (running twice = running once).
+      [`reinstall_is_idempotent`]
+- [x] No markers → block appended with one blank-line separator, prior
+      content intact. [`no_markers_appends_and_keeps_user_content`]
+- [x] Malformed markers (BEGIN-only, END-only, reversed) → error.
+      [`malformed_markers_error`]
 
-Command / filesystem (tempdir):
+Command / filesystem (`tests/agents_info.rs`, tempdir):
 
-- [ ] `--install <tmp>` → file exists at the expected path with the managed
-      block; parent dir created if absent.
-- [ ] Re-install → no duplication; block replaced; surrounding user content
-      preserved.
+- [x] `agents-info` (no flag) still prints the guide.
+      [`agents_info_prints_the_guide`]
+- [x] `--install <dir>` → `SKILL.md` exists with the managed block; parent
+      dirs created. [`install_writes_skill_with_managed_block`]
+- [x] Re-install → no duplication; user content before and after the block
+      preserved. [`reinstall_does_not_duplicate_and_preserves_user_content`]
 
 ## Work items
 
-- [ ] Tests written and red (pure splice + tempdir install).
-- [ ] `upsert_managed_block` pure function with marker handling.
-- [ ] Managed-block body sourced from agents-info workflow section (no
-      drift).
-- [ ] `--install <dir>` (+ `--force`?) on `agents-info`; mkdir -p; write.
-- [ ] Coordinate filename/path default with q2 (`SKILL.md` under
-      `.claude/skills/braid/`).
-- [ ] `cargo xtask ci` green (`docs_drift`: `agents-info` subcommand still
-      listed; new flag documented).
+- [x] Tests written and red (pure splice + tempdir install).
+- [x] `upsert_managed_block` pure function with marker handling (BEGIN/END
+      delimiters; malformed → error).
+- [x] Managed-block body defers to `braid agents-info` rather than copying
+      the command table — cannot drift. (Decided against programmatically
+      slicing agents-info.md: fragile; a thin pointer is the sound choice.)
+- [x] `--install <dir>` on `agents-info`; `create_dir_all`; write `SKILL.md`.
+      (No `--force` — replacing only the managed block is already safe.)
+- [x] Default filename `SKILL.md`; q2 points `--install` at
+      `.claude/skills/braid/` (installer is host-agnostic).
+- [x] `cargo xtask ci` green.
 
 ## Docs to touch (same commit)
 

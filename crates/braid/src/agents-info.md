@@ -32,6 +32,12 @@ shows a redacted prefix; the full id is printed exclusively by
 `braid secret` — run that only when a human explicitly asks for it (e.g.
 to configure another machine).
 
+To wire braid into a project's agent tooling, run `braid agents-info
+--install <dir>` (e.g. `.claude/skills/braid/`). It writes a `SKILL.md`
+stub that just defers back to `braid agents-info`, so it never goes stale.
+The installer is idempotent: it manages a delimited block in place and
+preserves any surrounding content, so re-running only refreshes that block.
+
 ## The agent workflow
 
 ```sh

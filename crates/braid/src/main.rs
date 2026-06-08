@@ -187,8 +187,14 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Print the agent-facing usage guide (markdown)
-    AgentsInfo,
+    /// Print the agent-facing usage guide (markdown), or install a skill stub
+    AgentsInfo {
+        /// Instead of printing, write/update a braid skill file (SKILL.md)
+        /// in DIR — idempotent, preserves surrounding content. Point it at
+        /// e.g. .claude/skills/braid/.
+        #[arg(long, value_name = "DIR")]
+        install: Option<std::path::PathBuf>,
+    },
     /// Print the skein secret (doc id + sync server) — grants read/write access; share deliberately
     Secret,
     /// Import strands from a JSONL file (beads or braid format); upserts by id
@@ -360,10 +366,13 @@ async fn main() {
         }
         Cmd::Blocked { json } => commands::blocked(&cwd, json).await,
         Cmd::Search { text, json } => commands::search(&cwd, &text, json).await,
-        Cmd::AgentsInfo => {
-            commands::agents_info();
-            Ok(())
-        }
+        Cmd::AgentsInfo { install } => match install {
+            Some(dir) => commands::agents_info_install(&dir),
+            None => {
+                commands::agents_info();
+                Ok(())
+            }
+        },
         Cmd::Secret => commands::secret(&cwd),
         Cmd::Rotate { revoke, adopt } => {
             if adopt {
