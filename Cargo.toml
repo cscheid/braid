@@ -3,7 +3,7 @@ members = ["crates/braid-core", "crates/braid", "crates/xtask"]
 resolver = "2"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/cscheid/braid"
