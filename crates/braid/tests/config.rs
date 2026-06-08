@@ -217,6 +217,29 @@ fn gather_reads_user_config_via_xdg() {
 }
 
 #[test]
+fn user_config_path_falls_back_to_userprofile_on_windows() {
+    // XDG wins when set
+    let e = env_map(&[("XDG_CONFIG_HOME", "/xdg"), ("HOME", "/home/u")]);
+    assert_eq!(user_config_path(&e), Some(PathBuf::from("/xdg/braid/projects.toml")));
+
+    // HOME otherwise
+    let e = env_map(&[("HOME", "/home/u")]);
+    assert_eq!(user_config_path(&e), Some(PathBuf::from("/home/u/.config/braid/projects.toml")));
+
+    // Windows: no HOME → USERPROFILE
+    let e = env_map(&[("USERPROFILE", "/users/u")]);
+    assert_eq!(user_config_path(&e), Some(PathBuf::from("/users/u/.config/braid/projects.toml")));
+
+    // HOME wins over USERPROFILE
+    let e = env_map(&[("HOME", "/home/u"), ("USERPROFILE", "/users/u")]);
+    assert_eq!(user_config_path(&e), Some(PathBuf::from("/home/u/.config/braid/projects.toml")));
+
+    // neither → None
+    let e = env_map(&[]);
+    assert_eq!(user_config_path(&e), None);
+}
+
+#[test]
 fn gather_picks_up_env_vars() {
     let tmp = tempfile::tempdir().unwrap();
     let env = env_map(&[

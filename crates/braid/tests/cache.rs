@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use braid::cache::{FsStorage, HashedKeyStorage, cache_dir, hash_component, open_cache_storage};
+use braid::cache::{FsStorage, HashedKeyStorage, cache_dir, hash_component};
 use samod::storage::{Storage, StorageKey};
 
 const DOC_ID: &str = "4NMNnkMhL8jXrdJbSeuJtZtnDoiu";
@@ -140,6 +140,14 @@ fn cache_dir_precedence() {
     let e = env(vec![("HOME", "/home/u")]);
     assert_eq!(cache_dir(&e), Some(PathBuf::from("/home/u/.cache/braid")));
 
+    // Windows: no HOME, fall back to USERPROFILE
+    let e = env(vec![("USERPROFILE", "/users/u")]);
+    assert_eq!(cache_dir(&e), Some(PathBuf::from("/users/u/.cache/braid")));
+
+    // HOME wins over USERPROFILE when both are present
+    let e = env(vec![("HOME", "/home/u"), ("USERPROFILE", "/users/u")]);
+    assert_eq!(cache_dir(&e), Some(PathBuf::from("/home/u/.cache/braid")));
+
     let e = env(vec![]);
     assert_eq!(cache_dir(&e), None);
 }
@@ -147,6 +155,7 @@ fn cache_dir_precedence() {
 #[cfg(unix)]
 #[tokio::test]
 async fn open_cache_storage_sets_700_permissions() {
+    use braid::cache::open_cache_storage;
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempfile::tempdir().unwrap();

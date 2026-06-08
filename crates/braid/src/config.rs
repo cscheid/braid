@@ -103,8 +103,12 @@ pub enum ConfigError {
     #[error("could not parse {path}: {source}")]
     Parse {
         path: PathBuf,
+        // Boxed: `toml::de::Error` is large enough to push `ConfigError`
+        // (and every `Result<_, ConfigError>`) over clippy's
+        // result_large_err threshold on some targets (Windows). Boxing
+        // keeps the error — and the common Ok path — small.
         #[source]
-        source: toml::de::Error,
+        source: Box<toml::de::Error>,
     },
 }
 
@@ -181,7 +185,7 @@ fn read_to_string(path: &Path) -> Result<String, ConfigError> {
 
 fn parse_toml<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, ConfigError> {
     toml::from_str(&read_to_string(path)?)
-        .map_err(|source| ConfigError::Parse { path: path.to_path_buf(), source })
+        .map_err(|source| ConfigError::Parse { path: path.to_path_buf(), source: Box::new(source) })
 }
 
 /// Filesystem + environment discovery, with an injectable env lookup (for
@@ -246,11 +250,14 @@ fn git_user_name(cwd: &Path) -> Option<String> {
     non_blank(Some(String::from_utf8_lossy(&out.stdout).to_string()))
 }
 
-/// Path of the user-level config file, honoring `XDG_CONFIG_HOME`.
+/// Path of the user-level config file, honoring `XDG_CONFIG_HOME`. The home
+/// directory is `HOME`, falling back to `USERPROFILE` on Windows (where
+/// `HOME` is usually unset).
 pub fn user_config_path(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let home = || non_blank(env("HOME")).or_else(|| non_blank(env("USERPROFILE")));
     let base = match non_blank(env("XDG_CONFIG_HOME")) {
         Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(non_blank(env("HOME"))?).join(".config"),
+        None => PathBuf::from(home()?).join(".config"),
     };
     Some(base.join("braid").join("projects.toml"))
 }

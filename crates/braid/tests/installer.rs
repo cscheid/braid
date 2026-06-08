@@ -1,5 +1,9 @@
 //! E2E tests for install.sh, the curl|bash installer.
 //!
+//! Unix-only: the harness runs `bash install.sh` and shims `uname` with
+//! executable shell scripts, so the whole suite is gated to `cfg(unix)`.
+//! The Windows installer story (PowerShell / Scoop) gets its own tests.
+//!
 //! Modeled on beads_rust's installer test harness, but offline-first:
 //! every install path is exercised through `--artifact-url file://...`
 //! plus `--checksum`, so no test here touches the network. (One ignored
@@ -10,6 +14,8 @@
 //! PATH rather than by parsing the script.
 //!
 //! Plan: claude-notes/plans/2026/06/04/installer.md (strand br-iju0n3gd)
+
+#![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

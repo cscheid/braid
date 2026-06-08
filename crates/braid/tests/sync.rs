@@ -84,6 +84,14 @@ impl Clone_ {
             .env("HOME", &self.home)
             // keep tests snappy; everything here is loopback
             .env("BRAID_SYNC_TIMEOUT", "10");
+        // Windows: env_clear() strips SystemRoot, without which Winsock
+        // can't initialize and the spawned process can't reach the sync
+        // server. No-op on Unix (these vars don't exist there).
+        for key in ["SystemRoot", "SystemDrive", "TEMP", "TMP"] {
+            if let Ok(val) = std::env::var(key) {
+                c.env(key, val);
+            }
+        }
         c
     }
 
