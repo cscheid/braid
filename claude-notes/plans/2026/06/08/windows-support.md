@@ -51,9 +51,25 @@ manifest auto-updated on release).
 - [x] Gate `tests/installer.rs` to `#![cfg(unix)]`.
 - [x] Add `windows-latest` job to `ci.yml` (build + test + clippy; no
       minisign needed since installer tests compile out).
-- [ ] First Windows CI run green — iterate on real failures (env_clear /
-      SystemRoot the prime suspect; possibly path/line-ending assertions).
-- [ ] Update br-9b5rxe75 with what CI actually surfaced.
+- [x] First Windows CI run green. What CI actually surfaced (4 iterations):
+      1. Whole suite passed except live-sync tests — confirming the
+         `HOME`→`USERPROFILE` fix and installer cfg-gate, and that
+         `env_clear` does NOT break plain subprocess spawning on Windows.
+      2. `env_clear` *does* break **networked** subprocesses: it strips
+         `SystemRoot`, so Winsock can't init and the spawned `braid` can't
+         reach the in-process sync server. Fixed in the harnesses that dial
+         a live relay (`mcp_cli.rs`, `rotate.rs`, `sync.rs`) by re-adding
+         `SystemRoot`/`SystemDrive`/`TEMP`/`TMP` after `env_clear` (no-op on
+         Unix). DEAD_SERVER tests never connect, so they were unaffected.
+      3. `clippy::result_large_err` on Windows only: `ConfigError::Parse`
+         embeds a bulky `toml::de::Error` that tips the enum past 128 bytes
+         on Windows. Boxed it — keeps every `Result<_, ConfigError>` small.
+      4. `open_cache_storage` import was unused on Windows (its only user is
+         a `cfg(unix)` test) → scoped the import into that test.
+- [x] **No samod/networking bug**: once the env was right, all live `tcp://`
+      sync tests passed on Windows. (Production uses `wss://` anyway.)
+- [ ] Update br-9b5rxe75 with the above; close it (code is portable + proven
+      by CI).
 
 ## Phase 2 — release artifact (not started)
 
