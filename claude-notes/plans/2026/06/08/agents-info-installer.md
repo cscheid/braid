@@ -102,6 +102,31 @@ Install logic:
   into a **pure function** so it's unit-testable without touching disk.
 - No braid-core change (this is CLI/filesystem, not schema/domain).
 
+## Correction (post-0.3.0, br-6lgfaus0) — emit YAML frontmatter
+
+The q2 agent found the installed `SKILL.md` had no frontmatter. Per the
+Claude Code docs a body-only skill *does* load (the description falls back
+to the first paragraph), so "not discoverable" was overstated — but without
+an explicit `name`/`description` auto-invocation is unreliable, and every
+other skill in this repo uses frontmatter. **Decided: emit frontmatter.**
+
+Crucially, YAML frontmatter must be the file's **first bytes**, which the
+original "append a managed block, preserve surrounding content" design
+can't satisfy (a leading `<!-- BEGIN -->` comment breaks frontmatter
+parsing). So the model changed:
+
+- The braid-managed **head** = frontmatter (`name` from the install dir's
+  base name; a `description` naming the triggers) + the body between
+  markers, always at offset 0.
+- Reinstall refreshes that whole head and **preserves content after the END
+  marker** (a user can append below); it no longer preserves content
+  *before* the block (frontmatter must lead).
+- A non-empty `SKILL.md` with no braid markers → **refuse** (don't clobber a
+  file braid didn't write; can't safely merge under the frontmatter rule).
+  This replaces the old "append to any existing file" behavior.
+
+Shipped in 0.3.1.
+
 ## Test plan (write first — TDD)
 
 Pure splice fn (`commands::tests`, no I/O):
