@@ -46,6 +46,27 @@ jobs:
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  # Windows (x86_64-pc-windows-msvc) build + test. minisign is not needed:
+  # the install.sh tests are cfg(unix) (they run bash and shell shims), so
+  # they compile out here. `run:` defaults to PowerShell on this runner, but
+  # the cargo invocations are shell-agnostic. No env_clear concerns in CI
+  # itself — only the e2e harnesses touch the environment.
+  windows:
+    name: test & clippy (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+      # Build-first for the same assert_cmd relink-race reason as the unix job.
+      - run: cargo build --workspace --all-targets
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
   # Gate for the static-musl release targets (see
   # claude-notes/plans/2026/06/04/installer.md): musl breakage tends to
   # hide in transitive deps (native-tls→openssl was ours; libc::statx was

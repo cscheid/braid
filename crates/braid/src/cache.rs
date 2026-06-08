@@ -289,7 +289,9 @@ impl Storage for FsStorage {
 }
 
 /// Resolve the braid cache directory: `BRAID_CACHE_DIR` >
-/// `XDG_CACHE_HOME/braid` > `~/.cache/braid`.
+/// `XDG_CACHE_HOME/braid` > `~/.cache/braid`. The home directory is `HOME`,
+/// falling back to `USERPROFILE` on Windows (where `HOME` is usually
+/// unset).
 pub fn cache_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     let non_blank = |k: &str| {
         env(k).and_then(|v| {
@@ -303,7 +305,9 @@ pub fn cache_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     if let Some(xdg) = non_blank("XDG_CACHE_HOME") {
         return Some(PathBuf::from(xdg).join("braid"));
     }
-    non_blank("HOME").map(|home| PathBuf::from(home).join(".cache").join("braid"))
+    non_blank("HOME")
+        .or_else(|| non_blank("USERPROFILE"))
+        .map(|home| PathBuf::from(home).join(".cache").join("braid"))
 }
 
 /// Create (mode 700) the cache directory and open hashed filesystem

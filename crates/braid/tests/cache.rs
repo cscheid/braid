@@ -140,6 +140,14 @@ fn cache_dir_precedence() {
     let e = env(vec![("HOME", "/home/u")]);
     assert_eq!(cache_dir(&e), Some(PathBuf::from("/home/u/.cache/braid")));
 
+    // Windows: no HOME, fall back to USERPROFILE
+    let e = env(vec![("USERPROFILE", "/users/u")]);
+    assert_eq!(cache_dir(&e), Some(PathBuf::from("/users/u/.cache/braid")));
+
+    // HOME wins over USERPROFILE when both are present
+    let e = env(vec![("HOME", "/home/u"), ("USERPROFILE", "/users/u")]);
+    assert_eq!(cache_dir(&e), Some(PathBuf::from("/home/u/.cache/braid")));
+
     let e = env(vec![]);
     assert_eq!(cache_dir(&e), None);
 }

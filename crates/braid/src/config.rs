@@ -246,11 +246,14 @@ fn git_user_name(cwd: &Path) -> Option<String> {
     non_blank(Some(String::from_utf8_lossy(&out.stdout).to_string()))
 }
 
-/// Path of the user-level config file, honoring `XDG_CONFIG_HOME`.
+/// Path of the user-level config file, honoring `XDG_CONFIG_HOME`. The home
+/// directory is `HOME`, falling back to `USERPROFILE` on Windows (where
+/// `HOME` is usually unset).
 pub fn user_config_path(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let home = || non_blank(env("HOME")).or_else(|| non_blank(env("USERPROFILE")));
     let base = match non_blank(env("XDG_CONFIG_HOME")) {
         Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(non_blank(env("HOME"))?).join(".config"),
+        None => PathBuf::from(home()?).join(".config"),
     };
     Some(base.join("braid").join("projects.toml"))
 }
