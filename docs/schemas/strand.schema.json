@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/cscheid/braid/main/docs/schemas/strand.schema.json",
   "title": "braid strand record",
   "description": "One strand (issue) as emitted by `braid export`: one JSON object per JSONL line. This is the strict writer contract — `braid import` accepts a superset (see docs/schemas/README.md). The schema is version-matched to the braid release that ships it.",
-  "$comment": "braid 0.2.1; document schema_version 1. Additive change vs the initial 0.1.0 schema: optional `defer_until` (no document schema_version bump — old binaries ignore and preserve the field).",
+  "$comment": "braid 0.3.0; document schema_version 1. No export-shape change vs 0.2.1 (0.3.0 adds `dep tree`, `create --deps`, and import-side beads tombstone skipping — none alter the exported strand). Additive change vs the initial 0.1.0 schema: optional `defer_until` (no document schema_version bump — old binaries ignore and preserve the field).",
   "type": "object",
   "properties": {
     "id": {
