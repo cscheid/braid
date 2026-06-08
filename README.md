@@ -92,10 +92,10 @@ braid list                  # open strands, fetched from the sync server
 Agents: run `braid agents-info` for a complete, version-matched usage
 guide. To wire braid into a project's agent tooling, run `braid agents-info
 --install <dir>` (e.g. `.claude/skills/braid/`): it writes a `SKILL.md`
-stub that defers to `braid agents-info` for the authoritative guide. The
-installer is idempotent — it manages a delimited block in place and
-preserves any surrounding content, so re-running on a new braid version
-just refreshes that block.
+with YAML frontmatter (so it's a discoverable skill) over a body that
+defers to `braid agents-info` for the authoritative guide. The installer is
+idempotent — it refreshes the braid-managed head in place and preserves any
+trailing content, so re-running on a new braid version just refreshes it.
 
 ## ⚠️ The document id is a secret
 

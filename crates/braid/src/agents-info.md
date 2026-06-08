@@ -33,10 +33,12 @@ shows a redacted prefix; the full id is printed exclusively by
 to configure another machine).
 
 To wire braid into a project's agent tooling, run `braid agents-info
---install <dir>` (e.g. `.claude/skills/braid/`). It writes a `SKILL.md`
-stub that just defers back to `braid agents-info`, so it never goes stale.
-The installer is idempotent: it manages a delimited block in place and
-preserves any surrounding content, so re-running only refreshes that block.
+--install <dir>` (e.g. `.claude/skills/braid/`). It writes a `SKILL.md` —
+YAML frontmatter (`name` from the directory, plus a `description` so the
+skill auto-invokes) over a body that just defers back to `braid
+agents-info`, so it never goes stale. The installer is idempotent: it
+refreshes the braid-managed head in place and preserves any content after
+the end marker; it refuses to overwrite a `SKILL.md` braid didn't write.
 
 ## The agent workflow
 

@@ -900,15 +900,18 @@ pub fn agents_info() {
     print!("{}", include_str!("agents-info.md"));
 }
 
-// Delimiters around the braid-managed region of an installed skill file.
-// Re-installing replaces only the text between them, byte-for-byte
-// preserving any surrounding user content.
+// Delimiters around the braid-managed body of an installed skill file. The
+// braid-managed *head* (YAML frontmatter + this body) always sits at the
+// top of the file — frontmatter must be the file's first bytes to be a
+// valid skill — so the managed region runs from offset 0 through the END
+// marker. Re-installing refreshes that head and preserves any user content
+// after END byte-for-byte.
 const BRAID_BLOCK_BEGIN: &str = "<!-- BEGIN BRAID (managed by `braid agents-info --install`) -->";
 const BRAID_BLOCK_END: &str = "<!-- END BRAID -->";
 
-/// The managed-block body. Deliberately thin: it points at `braid
-/// agents-info` (the authoritative, version-matched guide) rather than
-/// duplicating the command table, so it cannot drift out of date.
+/// The skill body. Deliberately thin: it points at `braid agents-info`
+/// (the authoritative, version-matched guide) rather than duplicating the
+/// command table, so it cannot drift out of date.
 const SKILL_BODY: &str = "\
 # braid issue tracking
 
@@ -927,20 +930,38 @@ File discovered work as you go in one shot:
 
 Attribute your changes with `BRAID_AUTHOR=<you>`.";
 
-/// The full managed block (markers + body) written into a skill file.
-fn managed_block() -> String {
-    format!("{BRAID_BLOCK_BEGIN}\n{SKILL_BODY}\n{BRAID_BLOCK_END}")
+/// The skill `description` — drives Claude Code's auto-invocation, so it
+/// names the triggers rather than just describing braid.
+const SKILL_DESCRIPTION: &str = "braid issue tracking for this project. Use \
+when filing, finding, updating, or closing work items (\"strands\"), or when \
+the user mentions braid, issues, tasks, bugs, or what to work on.";
+
+/// YAML frontmatter so the file is a discoverable Claude Code skill. A
+/// body-only SKILL.md loads but has no `description` to drive
+/// auto-invocation; `name` is the skill's display label (Claude derives the
+/// invocable name from the directory regardless).
+fn skill_frontmatter(name: &str) -> String {
+    format!("---\nname: {name}\ndescription: {SKILL_DESCRIPTION}\n---\n")
 }
 
-/// Splice the braid managed `block` into `existing`, returning the new file
-/// contents. Idempotent and content-preserving:
-/// - no markers, empty file → the block alone;
-/// - no markers, non-empty file → append the block, keeping prior content;
-/// - markers present → replace only the marked region, preserving text
-///   before and after byte-for-byte;
-/// - malformed markers (only one, or END before BEGIN) → an error rather
-///   than a guess.
-fn upsert_managed_block(existing: &str, block: &str) -> Result<String> {
+/// braid's managed head for a skill file: frontmatter, then the body
+/// between markers. Frontmatter must be the file's first bytes, so this is
+/// always written at offset 0.
+fn skill_head(name: &str) -> String {
+    format!("{}\n{BRAID_BLOCK_BEGIN}\n{SKILL_BODY}\n{BRAID_BLOCK_END}", skill_frontmatter(name))
+}
+
+/// Produce the new SKILL.md contents by installing braid's managed `head`
+/// into `existing`:
+/// - empty/absent → the head alone;
+/// - braid markers present → replace everything up to and including the END
+///   marker with the fresh head (frontmatter included), preserving any user
+///   content *after* END byte-for-byte;
+/// - non-empty file with no braid markers → refuse, rather than clobber a
+///   file braid did not write (frontmatter must lead, so we can't safely
+///   merge);
+/// - a lone or out-of-order marker → error rather than guess.
+fn upsert_skill(existing: &str, head: &str) -> Result<String> {
     let begin = existing.find(BRAID_BLOCK_BEGIN);
     let end = existing.find(BRAID_BLOCK_END);
     match (begin, end) {
@@ -952,7 +973,8 @@ fn upsert_managed_block(existing: &str, block: &str) -> Result<String> {
                 );
             }
             let end_full = e + BRAID_BLOCK_END.len();
-            Ok(format!("{}{block}{}", &existing[..b], &existing[end_full..]))
+            let tail = &existing[end_full..];
+            if tail.is_empty() { Ok(format!("{head}\n")) } else { Ok(format!("{head}{tail}")) }
         }
         (Some(_), None) => bail!(
             "malformed braid block in target: a BEGIN marker without a matching END. \
@@ -964,32 +986,39 @@ fn upsert_managed_block(existing: &str, block: &str) -> Result<String> {
         ),
         (None, None) => {
             if existing.trim().is_empty() {
-                Ok(format!("{block}\n"))
+                Ok(format!("{head}\n"))
             } else {
-                let sep = if existing.ends_with('\n') { "\n" } else { "\n\n" };
-                Ok(format!("{existing}{sep}{block}\n"))
+                bail!(
+                    "the target SKILL.md already exists and was not written by braid \
+                     (no managed block). A skill needs braid's frontmatter at the very \
+                     top, so it can't be merged in safely — remove the file or point \
+                     --install at a different directory."
+                )
             }
         }
     }
 }
 
-/// Install (or refresh) the braid skill stub in `dir`, writing `SKILL.md`.
-/// Creates `dir` if needed; idempotent via [`upsert_managed_block`].
+/// Install (or refresh) the braid skill in `dir`, writing `SKILL.md` with
+/// YAML frontmatter (so it is a discoverable Claude Code skill) plus a body
+/// that defers to `braid agents-info`. Creates `dir` if needed; idempotent
+/// via [`upsert_skill`]. The skill `name` is the directory's base name
+/// (e.g. `.claude/skills/braid/` → `braid`).
 pub fn agents_info_install(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir)
         .with_context(|| format!("cannot create directory {}", dir.display()))?;
+    let name = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|s| !s.is_empty() && *s != ".")
+        .unwrap_or("braid");
     let path = dir.join("SKILL.md");
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     let had_block = existing.contains(BRAID_BLOCK_BEGIN);
-    let updated = upsert_managed_block(&existing, &managed_block())?;
+    let updated = upsert_skill(&existing, &skill_head(name))
+        .with_context(|| format!("cannot install braid skill into {}", path.display()))?;
     std::fs::write(&path, updated).with_context(|| format!("cannot write {}", path.display()))?;
-    let verb = if existing.is_empty() {
-        "wrote"
-    } else if had_block {
-        "refreshed braid block in"
-    } else {
-        "added braid block to"
-    };
+    let verb = if had_block { "refreshed braid skill in" } else { "wrote" };
     println!("{verb} {}", path.display());
     Ok(())
 }
@@ -1044,65 +1073,74 @@ pub async fn list(
 
 #[cfg(test)]
 mod tests {
-    use super::{BRAID_BLOCK_BEGIN, BRAID_BLOCK_END, managed_block, upsert_managed_block};
+    use super::{BRAID_BLOCK_BEGIN, BRAID_BLOCK_END, skill_head, upsert_skill};
 
     #[test]
-    fn empty_input_yields_just_the_block() {
-        let block = managed_block();
-        let out = upsert_managed_block("", &block).unwrap();
-        assert_eq!(out, format!("{block}\n"));
+    fn empty_input_yields_frontmatter_then_block() {
+        let head = skill_head("braid");
+        let out = upsert_skill("", &head).unwrap();
+        assert_eq!(out, format!("{head}\n"));
+        // valid skill: YAML frontmatter is the very first bytes
+        assert!(out.starts_with("---\nname: braid\n"), "frontmatter at top: {out}");
+        assert!(out.contains("description: braid issue tracking"));
         assert!(out.contains(BRAID_BLOCK_BEGIN) && out.contains(BRAID_BLOCK_END));
     }
 
     #[test]
-    fn existing_block_is_replaced_preserving_surroundings() {
-        let before = "# My skills\n\nsome intro\n\n";
-        let after = "\n\n## Other skill\n\ntrailing user content\n";
-        // an OLD managed block with stale body between the markers
-        let stale = format!("{BRAID_BLOCK_BEGIN}\nOLD STALE BODY\n{BRAID_BLOCK_END}");
-        let file = format!("{before}{stale}{after}");
+    fn frontmatter_precedes_the_managed_block() {
+        let head = skill_head("braid");
+        let out = upsert_skill("", &head).unwrap();
+        let fm_end = out.find("\n---\n").expect("closing frontmatter fence");
+        let begin = out.find(BRAID_BLOCK_BEGIN).expect("begin marker");
+        assert!(fm_end < begin, "frontmatter must close before the body block");
+    }
 
-        let block = managed_block();
-        let out = upsert_managed_block(&file, &block).unwrap();
+    #[test]
+    fn reinstall_refreshes_head_and_preserves_trailing() {
+        // a previously-installed file whose body is stale, plus user content
+        // appended after the END marker
+        let tail = "\n\n## Project notes\n\nhand-written, keep me\n";
+        let stale = format!(
+            "---\nname: braid\ndescription: OLD\n---\n\n{BRAID_BLOCK_BEGIN}\nOLD STALE BODY\n{BRAID_BLOCK_END}"
+        );
+        let file = format!("{stale}{tail}");
 
-        // surrounding content preserved byte-for-byte
-        assert!(out.starts_with(before), "leading content preserved");
-        assert!(out.ends_with(after), "trailing content preserved");
-        // stale body gone, fresh block in place, exactly once
-        assert!(!out.contains("OLD STALE BODY"));
+        let head = skill_head("braid");
+        let out = upsert_skill(&file, &head).unwrap();
+
+        assert!(out.starts_with("---\nname: braid\n"), "frontmatter refreshed at top");
+        assert!(!out.contains("OLD STALE BODY"), "stale body gone");
+        assert!(!out.contains("description: OLD"), "stale description refreshed");
+        assert!(out.ends_with(tail), "trailing user content preserved byte-for-byte");
         assert_eq!(out.matches(BRAID_BLOCK_BEGIN).count(), 1, "no duplication");
-        assert!(out.contains("braid agents-info"));
     }
 
     #[test]
     fn reinstall_is_idempotent() {
-        let block = managed_block();
-        let once = upsert_managed_block("# header\n", &block).unwrap();
-        let twice = upsert_managed_block(&once, &block).unwrap();
+        let head = skill_head("braid");
+        let once = upsert_skill("", &head).unwrap();
+        let twice = upsert_skill(&once, &head).unwrap();
         assert_eq!(once, twice, "re-installing changes nothing");
         assert_eq!(twice.matches(BRAID_BLOCK_BEGIN).count(), 1);
     }
 
     #[test]
-    fn no_markers_appends_and_keeps_user_content() {
-        let block = managed_block();
-        let out = upsert_managed_block("# My existing notes\n", &block).unwrap();
-        assert!(out.starts_with("# My existing notes\n"));
-        assert!(out.contains(BRAID_BLOCK_BEGIN));
-        // exactly one blank line between user content and the block
-        assert!(out.contains("# My existing notes\n\n<!-- BEGIN BRAID"));
+    fn refuses_to_clobber_a_non_braid_file() {
+        // a non-empty file braid didn't write must not be silently rewritten
+        let head = skill_head("braid");
+        assert!(upsert_skill("# Someone else's skill\n\nbody\n", &head).is_err());
     }
 
     #[test]
     fn malformed_markers_error() {
-        let block = managed_block();
+        let head = skill_head("braid");
         let begin_only = format!("intro\n{BRAID_BLOCK_BEGIN}\nbody, no end\n");
-        assert!(upsert_managed_block(&begin_only, &block).is_err());
+        assert!(upsert_skill(&begin_only, &head).is_err());
 
         let end_only = format!("intro\n{BRAID_BLOCK_END}\n");
-        assert!(upsert_managed_block(&end_only, &block).is_err());
+        assert!(upsert_skill(&end_only, &head).is_err());
 
         let reversed = format!("{BRAID_BLOCK_END}\nx\n{BRAID_BLOCK_BEGIN}\n");
-        assert!(upsert_managed_block(&reversed, &block).is_err());
+        assert!(upsert_skill(&reversed, &head).is_err());
     }
 }
