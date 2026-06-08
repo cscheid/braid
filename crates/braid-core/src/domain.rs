@@ -32,6 +32,9 @@ pub struct ListFilter {
     pub assignee: Option<String>,
     /// Issue type; arbitrary strings match `Other(...)` strands.
     pub issue_type: Option<IssueType>,
+    /// Accepted priorities (OR within the set): a strand matches if its
+    /// priority is any of these. Empty means no priority constraint.
+    pub priorities: Vec<i64>,
 }
 
 impl ListFilter {
@@ -39,6 +42,7 @@ impl ListFilter {
         self.labels.iter().all(|l| issue.labels.contains(l))
             && self.assignee.as_deref().is_none_or(|a| issue.assignee.as_deref() == Some(a))
             && self.issue_type.as_ref().is_none_or(|t| issue.issue_type == *t)
+            && (self.priorities.is_empty() || self.priorities.contains(&issue.priority))
     }
 }
 
@@ -334,6 +338,39 @@ mod tests {
         ListFilter { issue_type: Some(IssueType::from(t)), ..Default::default() }
     }
 
+    fn priorities(p: &[i64]) -> ListFilter {
+        ListFilter { priorities: p.to_vec(), ..Default::default() }
+    }
+
+    fn issue_p(priority: i64) -> Issue {
+        let mut i = issue(&[], None, IssueType::Task);
+        i.priority = priority;
+        i
+    }
+
+    #[test]
+    fn priority_filter_is_or_over_the_set() {
+        // empty = no constraint
+        assert!(ListFilter::default().matches(&issue_p(2)));
+        // exact single
+        assert!(priorities(&[1]).matches(&issue_p(1)));
+        assert!(!priorities(&[1]).matches(&issue_p(2)));
+        // OR across the set
+        assert!(priorities(&[0, 1]).matches(&issue_p(0)));
+        assert!(priorities(&[0, 1]).matches(&issue_p(1)));
+        assert!(!priorities(&[0, 1]).matches(&issue_p(2)));
+    }
+
+    #[test]
+    fn priority_composes_with_other_filters_via_and() {
+        let i = issue(&["x"], Some("alice"), IssueType::Bug); // priority 2
+        let f = ListFilter { labels: vec!["x".into()], priorities: vec![2], ..Default::default() };
+        assert!(f.matches(&i));
+        // same filter but a non-matching priority fails the whole thing
+        let f = ListFilter { priorities: vec![0], ..f };
+        assert!(!f.matches(&i), "one failing field fails the filter");
+    }
+
     #[test]
     fn empty_filter_matches_everything() {
         assert!(ListFilter::default().matches(&issue(&[], None, IssueType::Task)));
@@ -379,6 +416,7 @@ mod tests {
             labels: vec!["x".into()],
             assignee: Some("alice".into()),
             issue_type: Some(IssueType::Bug),
+            ..Default::default()
         };
         assert!(f.matches(&i));
         let f = ListFilter { assignee: Some("bob".into()), ..f };

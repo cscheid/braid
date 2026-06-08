@@ -63,9 +63,9 @@ braid create "Fix the frobnicator" \
 
 | command | purpose |
 |---|---|
-| `braid ready [--label L]... [--assignee A] [--type T] [--json]` | active, unblocked strands — best starting point. Filters narrow the set: `--label` is repeatable (a strand must carry all), `--assignee` is an exact match, `--type` matches the issue type |
+| `braid ready [--label L]... [--assignee A] [--type T] [--priority N]... [--json]` | active, unblocked strands — best starting point. Filters narrow the set: `--label` is repeatable (a strand must carry all), `--assignee` is an exact match, `--type` matches the issue type, `--priority` is repeatable 0..=4 (a strand matches any of the given priorities) |
 | `braid blocked [--json]` | active strands blocked by dependencies, with blockers |
-| `braid list [--status S] [--all] [--label L]... [--assignee A] [--type T] [--json]` | open (non-closed) strands; `--all` includes closed. Same field filters as `ready` |
+| `braid list [--status S] [--all] [--label L]... [--assignee A] [--type T] [--priority N]... [--json]` | open (non-closed) strands; `--all` includes closed. Same field filters as `ready` |
 | `braid show <id> [--json]` | one strand (unique id fragments work: `braid show 6j42`) |
 | `braid search <text> [--json]` | case-insensitive substring over titles, prose, labels, comments |
 | `braid create <title> [flags]` | new strand; prints its id. Flags: `--description --type --priority --label --slug --assignee --deps --json`. `--deps <type>:<target-id>` attaches dependencies atomically (repeatable and comma-separated; the new strand depends on each target). A missing target fails the create, like `dep add` |

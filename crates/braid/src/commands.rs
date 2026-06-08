@@ -785,6 +785,8 @@ pub struct FilterOpts {
     pub labels: Vec<String>,
     pub assignee: Option<String>,
     pub issue_type: Option<String>,
+    /// Accepted priorities (OR); empty means no priority constraint.
+    pub priorities: Vec<i64>,
 }
 
 impl FilterOpts {
@@ -793,6 +795,7 @@ impl FilterOpts {
             labels: self.labels,
             assignee: self.assignee,
             issue_type: self.issue_type.map(|t| IssueType::from(t.as_str())),
+            priorities: self.priorities,
         }
     }
 }

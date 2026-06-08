@@ -92,6 +92,11 @@ fn specs() -> Vec<ToolSpec> {
                 "type": {
                     "type": "string",
                     "description": "Issue type: task|bug|feature|epic|chore|docs|question"
+                },
+                "priority": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 0, "maximum": 4},
+                    "description": "Accepted priorities 0..=4 (OR): a strand matches if its priority is any of them"
                 }
             },
             "additionalProperties": false
@@ -515,13 +520,23 @@ impl BraidServer {
             assignee: Option<String>,
             #[serde(rename = "type")]
             issue_type: Option<String>,
+            /// Accepted priorities (OR); empty means no constraint.
+            #[serde(default, rename = "priority")]
+            priorities: Vec<i64>,
         }
         impl FilterP {
+            fn validate(&self) -> Result<()> {
+                if let Some(&p) = self.priorities.iter().find(|&&p| !(0..=4).contains(&p)) {
+                    anyhow::bail!("priority {p} is out of range (expected 0..=4)");
+                }
+                Ok(())
+            }
             fn into_filter(self) -> ListFilter {
                 ListFilter {
                     labels: self.labels,
                     assignee: self.assignee,
                     issue_type: self.issue_type.map(|t| IssueType::from(t.as_str())),
+                    priorities: self.priorities,
                 }
             }
         }
@@ -529,6 +544,7 @@ impl BraidServer {
         match name {
             "braid_ready" => {
                 let p: FilterP = serde_json::from_value(args)?;
+                p.validate()?;
                 let strands = self.session.ready(&p.into_filter())?;
                 Ok(json!({"strands": strands, "count": strands_len(&strands)}))
             }
@@ -546,6 +562,7 @@ impl BraidServer {
                     filter: FilterP,
                 }
                 let p: P = serde_json::from_value(args)?;
+                p.filter.validate()?;
                 let strands =
                     self.session.list(p.status.as_deref(), p.all, &p.filter.into_filter())?;
                 Ok(json!({"strands": strands, "count": strands_len(&strands)}))
