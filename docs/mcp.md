@@ -59,7 +59,7 @@ chain); there is deliberately no per-call author parameter.
 
 | launch | tools served |
 |---|---|
-| `braid mcp --read-only` | queries only: ready, blocked, list, show, search, dep_list, dep_cycles, export |
+| `braid mcp --read-only` | queries only: ready, blocked, list, show, search, dep_list, dep_tree, dep_cycles, export |
 | `braid mcp` (default) | queries + reversible mutations: create, update, close, reopen, defer, undefer, comment, dep_add, dep_remove |
 | `braid mcp --enable-destructive` | everything + `braid_delete` and `braid_import` (**no undo**: a delete wins over concurrent edits; import overwrites same-id strands) |
 
@@ -98,6 +98,14 @@ URI) and re-read on notification.
   (array — a strand must carry **all** of them), `assignee` (exact match;
   unassigned strands never match), and `type`. `braid_list` additionally
   takes `status` / `all`, mirroring the CLI flags.
+- `braid_create` accepts an optional `deps` array of `<type>:<target-id>`
+  strings (e.g. `discovered-from:br-abc`); the new strand depends on each
+  target, attached atomically — a missing target fails the call and creates
+  nothing.
+- `braid_import` recognizes beads tombstones (soft-deleted records:
+  `status:"tombstone"` or a `deleted_at`/`delete_reason`/`deleted_by`
+  marker) and skips them; its result reports both `imported` and `skipped`
+  counts.
 - Mutation results carry `sync: "confirmed" | "unconfirmed" | "offline"` —
   whether the sync server acknowledged the change. Offline keeps working;
   results tell the truth. There is no sync tool: the session syncs

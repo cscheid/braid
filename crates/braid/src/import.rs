@@ -11,8 +11,12 @@
 //!   replaced with fresh `c-` ids) or a braid map with string ids (kept,
 //!   so braid → braid round-trips exactly)
 //! - beads-only fields (`source_repo`, `compaction_level`, `owner`,
-//!   `estimated_minutes`, tombstone/ephemeral/pinned/template machinery,
+//!   `estimated_minutes`, ephemeral/pinned/template machinery,
 //!   `agent_context`, …) are dropped
+//! - beads **tombstones** (soft-deleted records: `status:"tombstone"` or a
+//!   `deleted_at`/`delete_reason`/`deleted_by` marker) are recognized and
+//!   skipped entirely — never converted — and counted separately (see
+//!   [`is_tombstone`] / [`ParseOutcome`])
 //! - missing timestamps default to import time; missing `created_by`
 //!   defaults to "unknown"
 
@@ -57,6 +61,15 @@ struct RawIssue {
     defer_until: Option<String>,
     #[serde(default)]
     external_ref: Option<String>,
+    // beads soft-delete markers. braid has no tombstone concept; their
+    // presence means the record is deleted and must be skipped on import
+    // (see `is_tombstone`). Captured only for detection, never converted.
+    #[serde(default)]
+    deleted_at: Option<String>,
+    #[serde(default)]
+    delete_reason: Option<String>,
+    #[serde(default)]
+    deleted_by: Option<String>,
     #[serde(default)]
     labels: Vec<String>,
     #[serde(default)]
@@ -117,6 +130,25 @@ fn convert_status(s: &str) -> Status {
         "completed" => Status::Closed,
         other => Status::from(other),
     }
+}
+
+/// Is this raw record a beads tombstone (soft-deleted) that import should
+/// skip entirely? braid has no tombstone status, so a kept tombstone would
+/// hydrate as `Status::Other("tombstone")` — neither active nor terminal,
+/// and pure noise in `braid list`.
+///
+/// Detection is deliberately conservative: a record is a tombstone iff its
+/// status is literally `"tombstone"`, **or** it carries a non-empty beads
+/// deletion marker (`deleted_at` / `delete_reason` / `deleted_by`). beads
+/// writes `status:"closed"` *and* `deleted_at` on a delete, so the markers
+/// — not the status — are authoritative. An empty-string marker does not
+/// count (we only skip unambiguous deletions).
+fn is_tombstone(raw: &RawIssue) -> bool {
+    let has = |f: &Option<String>| f.as_deref().is_some_and(|s| !s.is_empty());
+    raw.status == "tombstone"
+        || has(&raw.deleted_at)
+        || has(&raw.delete_reason)
+        || has(&raw.deleted_by)
 }
 
 fn convert_comment(raw: RawComment, now: &str) -> Comment {
@@ -223,17 +255,32 @@ fn validate_id(id: &str, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// Result of parsing JSONL: the issues to upsert, plus the count of beads
+/// tombstones that were recognized and skipped (never converted).
+#[derive(Debug)]
+pub struct ParseOutcome {
+    pub issues: Vec<Issue>,
+    pub skipped: usize,
+}
+
 /// Parse JSONL text (beads or braid format) into issues. Fails on the
-/// first malformed line, naming its 1-based line number.
-pub fn parse_jsonl(text: &str) -> Result<Vec<Issue>> {
+/// first malformed line, naming its 1-based line number. beads tombstones
+/// are recognized and skipped (see [`is_tombstone`]); their count is
+/// reported separately and they are never validated or converted.
+pub fn parse_jsonl(text: &str) -> Result<ParseOutcome> {
     let now = now_rfc3339();
     let mut issues = Vec::new();
+    let mut skipped = 0usize;
     for (idx, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
         let context = || format!("line {}: not a valid issue record", idx + 1);
         let raw: RawIssue = serde_json::from_str(line).with_context(context)?;
+        if is_tombstone(&raw) {
+            skipped += 1;
+            continue;
+        }
         let issue = convert(raw, &now);
         (|| -> Result<()> {
             validate_id(&issue.id, "strand")?;
@@ -248,7 +295,7 @@ pub fn parse_jsonl(text: &str) -> Result<Vec<Issue>> {
         .with_context(|| format!("line {}", idx + 1))?;
         issues.push(issue);
     }
-    Ok(issues)
+    Ok(ParseOutcome { issues, skipped })
 }
 
 #[cfg(test)]
@@ -292,9 +339,85 @@ mod tests {
     #[test]
     fn blank_lines_are_skipped_and_errors_name_the_line() {
         let ok = parse_jsonl("\n\n").unwrap();
-        assert!(ok.is_empty());
+        assert!(ok.issues.is_empty());
+        assert_eq!(ok.skipped, 0);
         let err = parse_jsonl("{\"id\":\"a\",\"title\":\"t\",\"status\":\"open\"}\n\nnope\n")
             .unwrap_err();
         assert!(err.to_string().contains("line 3"), "got: {err}");
+    }
+
+    #[test]
+    fn tombstone_status_is_skipped() {
+        let jsonl = concat!(
+            r#"{"id":"bd-live","title":"live","status":"open"}"#,
+            "\n",
+            r#"{"id":"bd-dead","title":"dead","status":"tombstone","deleted_at":"2026-05-01T00:00:00Z","deleted_by":"x","delete_reason":"dup"}"#,
+            "\n",
+        );
+        let out = parse_jsonl(jsonl).unwrap();
+        assert_eq!(out.issues.len(), 1);
+        assert_eq!(out.issues[0].id, "bd-live");
+        assert_eq!(out.skipped, 1);
+    }
+
+    #[test]
+    fn closed_with_deleted_at_is_skipped() {
+        // beads writes status:closed *and* deleted_at on a delete; treat the
+        // presence of the deletion marker as authoritative and skip.
+        let out = parse_jsonl(
+            r#"{"id":"bd-x","title":"t","status":"closed","deleted_at":"2026-05-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert!(out.issues.is_empty());
+        assert_eq!(out.skipped, 1);
+    }
+
+    #[test]
+    fn delete_reason_or_deleted_by_alone_is_skipped() {
+        let by_reason =
+            parse_jsonl(r#"{"id":"a","title":"t","status":"open","delete_reason":"obsolete"}"#)
+                .unwrap();
+        assert!(by_reason.issues.is_empty());
+        assert_eq!(by_reason.skipped, 1);
+
+        let by_who =
+            parse_jsonl(r#"{"id":"b","title":"t","status":"open","deleted_by":"cscheid"}"#)
+                .unwrap();
+        assert!(by_who.issues.is_empty());
+        assert_eq!(by_who.skipped, 1);
+    }
+
+    #[test]
+    fn plain_closed_strand_is_imported_not_skipped() {
+        // closed but none of the beads deletion fields → a normal terminal
+        // strand, conservatively kept.
+        let out = parse_jsonl(r#"{"id":"bd-done","title":"t","status":"closed"}"#).unwrap();
+        assert_eq!(out.issues.len(), 1);
+        assert_eq!(out.skipped, 0);
+        assert_eq!(out.issues[0].status, Status::Closed);
+    }
+
+    #[test]
+    fn empty_deletion_fields_do_not_trigger_skip() {
+        // an empty string is not a real deletion marker; be conservative.
+        let out = parse_jsonl(
+            r#"{"id":"a","title":"t","status":"open","deleted_at":"","delete_reason":"","deleted_by":""}"#,
+        )
+        .unwrap();
+        assert_eq!(out.issues.len(), 1);
+        assert_eq!(out.skipped, 0);
+    }
+
+    #[test]
+    fn clean_file_skips_nothing() {
+        let jsonl = concat!(
+            r#"{"id":"a","title":"t","status":"open"}"#,
+            "\n",
+            r#"{"id":"b","title":"t","status":"in_progress"}"#,
+            "\n",
+        );
+        let out = parse_jsonl(jsonl).unwrap();
+        assert_eq!(out.issues.len(), 2);
+        assert_eq!(out.skipped, 0);
     }
 }

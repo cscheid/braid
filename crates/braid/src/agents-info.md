@@ -32,6 +32,12 @@ shows a redacted prefix; the full id is printed exclusively by
 `braid secret` — run that only when a human explicitly asks for it (e.g.
 to configure another machine).
 
+To wire braid into a project's agent tooling, run `braid agents-info
+--install <dir>` (e.g. `.claude/skills/braid/`). It writes a `SKILL.md`
+stub that just defers back to `braid agents-info`, so it never goes stale.
+The installer is idempotent: it manages a delimited block in place and
+preserves any surrounding content, so re-running only refreshes that block.
+
 ## The agent workflow
 
 ```sh
@@ -42,13 +48,13 @@ braid comment <id> "found the root cause in foo.rs; fixing"
 braid close <id> --reason "fixed in commit abc123"
 ```
 
-File newly discovered work as you go:
+File newly discovered work as you go — `--deps` links it in one shot:
 
 ```sh
-new=$(braid create "Fix the frobnicator" \
+braid create "Fix the frobnicator" \
     --description "It frobs when it should nicate." \
-    --type bug --priority 1 --label frobnicator)
-braid dep add "$new" <current-strand-id> --type discovered-from
+    --type bug --priority 1 --label frobnicator \
+    --deps discovered-from:<current-strand-id>
 ```
 
 ## Command reference
@@ -60,7 +66,7 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid list [--status S] [--all] [--label L]... [--assignee A] [--type T] [--json]` | open (non-closed) strands; `--all` includes closed. Same field filters as `ready` |
 | `braid show <id> [--json]` | one strand (unique id fragments work: `braid show 6j42`) |
 | `braid search <text> [--json]` | case-insensitive substring over titles, prose, labels, comments |
-| `braid create <title> [flags]` | new strand; prints its id. Flags: `--description --type --priority --label --slug --assignee --json` |
+| `braid create <title> [flags]` | new strand; prints its id. Flags: `--description --type --priority --label --slug --assignee --deps --json`. `--deps <type>:<target-id>` attaches dependencies atomically (repeatable and comma-separated; the new strand depends on each target). A missing target fails the create, like `dep add` |
 | `braid update <id> [flags]` | change fields: `--title --description --design --acceptance-criteria --notes --status --priority --type --assignee --external-ref --add-label --remove-label`; empty string clears |
 | `braid close <id>... [--reason R] [--force]` | close; refuses if open children unless `--force` |
 | `braid reopen <id>...` | reopen closed strands |
@@ -71,13 +77,14 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid dep add <id> <target> [--type T]` | `<id>` depends on `<target>`; default type `blocks` |
 | `braid dep remove <id> <target> [--type T]` | remove dependency |
 | `braid dep list <id>` | dependencies in both directions |
+| `braid dep tree <id> [--json]` | recursive parent-child descendant tree (epic → subtasks); each node shows status, closed children included, cycles broken with a `(cycle)` marker |
 | `braid dep cycles` | report dependency cycles |
 | `braid sync` | force a sync; fails when the server is unreachable |
 | `braid secret` | print the full doc id + sync server (paste-ready TOML). **Grants read/write access** — only run when a human asks |
 | `braid rotate` | move the skein to a fresh document (sheds history); stale clones are told to `--adopt`. **Only run when a human asks** |
 | `braid rotate --revoke` | rotation for a *leaked* doc id: no forwarding pointer is written; the new secret must be distributed out-of-band. **Only run when a human asks** |
 | `braid rotate --adopt` | follow a rotation: switch this clone to the successor skein (stragglers written to `.braid-stragglers.jsonl` for review) |
-| `braid import <file>` | import strands from JSONL (beads or braid format) |
+| `braid import <file>` | import strands from JSONL (beads or braid format); beads tombstones (soft-deleted records) are recognized and skipped, reported as `(skipped N tombstones)` |
 | `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |
 

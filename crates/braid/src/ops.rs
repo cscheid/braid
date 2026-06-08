@@ -15,11 +15,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use braid_core::amdoc::{delete_issue, hydrate, hydrate_metadata, reconcile_issue};
 use braid_core::domain::{
-    ListFilter, blocked_issues, dependency_cycles, dependents_of, listing_order, open_children,
-    ready_issues,
+    DepTreeNode, ListFilter, blocked_issues, dep_tree, dependency_cycles, dependents_of,
+    listing_order, open_children, ready_issues,
 };
 use braid_core::id::{new_comment_id, new_issue_id};
 use braid_core::schema::{Comment, Dependency, DependencyType, Issue, IssueType, Skein, Status};
@@ -101,6 +101,10 @@ pub struct Reopened {
 #[derive(Debug, Serialize)]
 pub struct Imported {
     pub imported: usize,
+    /// beads tombstones recognized and skipped during parsing (never
+    /// upserted). The session does not compute this — parsing does — so it
+    /// is passed in and carried through to the caller's report.
+    pub skipped: usize,
 }
 
 /// Skein metadata safe for any consumer: excludes the rotation fields
@@ -146,6 +150,30 @@ pub struct CreateOpts {
     pub labels: Vec<String>,
     pub slug: Option<String>,
     pub assignee: Option<String>,
+    /// `(dep_type, target-query)` edges to attach atomically: the new
+    /// strand depends on each target with the given type (matching
+    /// `dep add` direction). Targets are resolved like `dep add` — a
+    /// missing target fails the whole create, so no orphan strand is left.
+    /// Parse raw `<type>:<id>` strings with [`parse_dep_spec`].
+    pub deps: Vec<(String, String)>,
+}
+
+/// Parse a `--deps` / MCP dep spec of the form `<type>:<target-id>` into its
+/// parts. The type is taken up to the first colon (strand ids never contain
+/// colons — see import's `validate_id`). Unknown types are *not* rejected
+/// here: [`DependencyType::from`] maps them to `Other`, exactly as
+/// `dep add --type` does. Empty type, empty target, or a missing colon is a
+/// hard error so a typo can't silently become a bare-id dependency.
+pub fn parse_dep_spec(spec: &str) -> Result<(String, String)> {
+    let (dep_type, target) = spec.split_once(':').ok_or_else(|| {
+        anyhow!("--deps expects <type>:<target-id> (e.g. discovered-from:br-abc); got {spec:?}")
+    })?;
+    let dep_type = dep_type.trim();
+    let target = target.trim();
+    if dep_type.is_empty() || target.is_empty() {
+        bail!("--deps expects <type>:<target-id> (e.g. discovered-from:br-abc); got {spec:?}");
+    }
+    Ok((dep_type.to_string(), target.to_string()))
 }
 
 #[derive(Default)]
@@ -410,6 +438,15 @@ impl Session {
         Ok(dependency_cycles(&skein))
     }
 
+    /// The recursive `parent-child` descendant tree rooted at `query`. The
+    /// root is resolved like `show`/`dep list` (id fragments work); cycles
+    /// are broken in [`dep_tree`].
+    pub fn dep_tree(&self, query: &str) -> Result<DepTreeNode> {
+        let skein = self.hydrate()?;
+        let root = resolve_issue(&skein, query)?;
+        Ok(dep_tree(&skein, &root.id))
+    }
+
     /// All strands as JSONL (id-sorted), conforming to
     /// docs/schemas/strand.schema.json.
     pub fn export_jsonl(&self) -> Result<String> {
@@ -459,6 +496,25 @@ impl Session {
         }
 
         let now = now_rfc3339();
+
+        // Resolve and build the requested dependency edges *before* writing
+        // anything: a bad target must fail the whole create (no orphan
+        // strand). Resolution and normalization are identical to `dep add` —
+        // same `resolve_issue`, same `DependencyType::from`, same key. A
+        // freshly minted id cannot be an existing target, so no self-edge is
+        // possible here.
+        let mut dependencies = BTreeMap::new();
+        for (dep_type, target) in &opts.deps {
+            let target_id = resolve_issue(&skein, target)?.id.clone();
+            let dep = Dependency {
+                depends_on_id: target_id,
+                dep_type: DependencyType::from(dep_type.as_str()),
+                created_at: now.clone(),
+                created_by: self.opened.cfg.author.clone(),
+            };
+            dependencies.insert(dep.key(), dep);
+        }
+
         let issue = Issue {
             id,
             title: opts.title,
@@ -478,7 +534,7 @@ impl Session {
             defer_until: None,
             external_ref: None,
             labels: opts.labels.into_iter().collect::<BTreeSet<_>>(),
-            dependencies: BTreeMap::new(),
+            dependencies,
             comments: BTreeMap::new(),
         };
 
@@ -782,8 +838,10 @@ impl Session {
     }
 
     /// Upsert pre-parsed strands (per-issue transactions: reads inside one
-    /// giant automerge transaction are severely superlinear).
-    pub async fn import(&self, issues: &[Issue]) -> Result<Mutated<Imported>> {
+    /// giant automerge transaction are severely superlinear). `skipped` is
+    /// the count of beads tombstones the parse step dropped; it is reported
+    /// back verbatim, not recomputed here.
+    pub async fn import(&self, issues: &[Issue], skipped: usize) -> Result<Mutated<Imported>> {
         self.guard_rotation()?;
         self.opened.doc.with_document(|d| {
             for issue in issues {
@@ -792,6 +850,51 @@ impl Session {
             Ok::<_, braid_core::amdoc::ReconcileError>(())
         })?;
         let sync = self.opened.push().await;
-        Ok(Mutated { value: Imported { imported: issues.len() }, sync })
+        Ok(Mutated { value: Imported { imported: issues.len(), skipped }, sync })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_dep_spec;
+
+    #[test]
+    fn parse_dep_spec_splits_type_and_target() {
+        assert_eq!(
+            parse_dep_spec("discovered-from:br-abc").unwrap(),
+            ("discovered-from".to_string(), "br-abc".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_dep_spec_trims_whitespace() {
+        assert_eq!(
+            parse_dep_spec(" blocks : br-abc ").unwrap(),
+            ("blocks".to_string(), "br-abc".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_dep_spec_accepts_unknown_types_verbatim() {
+        // DependencyType::from maps unknowns to Other downstream; the parser
+        // does not gatekeep the type string.
+        assert_eq!(
+            parse_dep_spec("weird:br-abc").unwrap(),
+            ("weird".to_string(), "br-abc".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_dep_spec_rejects_missing_colon() {
+        let err = parse_dep_spec("notacolon").unwrap_err().to_string();
+        assert!(err.contains("notacolon"), "got: {err}");
+        assert!(err.contains("type"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_dep_spec_rejects_empty_parts() {
+        assert!(parse_dep_spec(":br-abc").is_err());
+        assert!(parse_dep_spec("blocks:").is_err());
+        assert!(parse_dep_spec(":").is_err());
     }
 }

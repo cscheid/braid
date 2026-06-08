@@ -99,6 +99,36 @@ fn import_beads_jsonl_maps_fields() {
 }
 
 #[test]
+fn import_skips_beads_tombstones_and_reports_count() {
+    let tmp = tempfile::tempdir().unwrap();
+    let t = Skein::new_at(tmp.path(), "tomb");
+    let jsonl = t.work.join("issues.jsonl");
+    std::fs::write(
+        &jsonl,
+        concat!(
+            r#"{"id":"bd-live","title":"Real work","status":"open","priority":2,"issue_type":"task","created_at":"2026-05-01T00:00:00Z","created_by":"x","updated_at":"2026-05-01T00:00:00Z"}"#,
+            "\n",
+            r#"{"id":"bd-1xf5","title":"deleted","status":"tombstone","deleted_at":"2026-05-01T00:00:00Z","deleted_by":"x","delete_reason":"merged into bd-live","source_repo":".","compaction_level":0}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    t.braid()
+        .args(["import", jsonl.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("imported 1 strands (skipped 1 tombstone)"));
+
+    // only the live strand exists; the tombstone was never created (so it
+    // can't show up as noise, even in --all)
+    let out = t.braid().args(["list", "--all", "--json"]).assert().success();
+    let all: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(all.as_array().unwrap().len(), 1);
+    assert_eq!(all[0]["id"], "bd-live");
+}
+
+#[test]
 fn import_is_an_upsert() {
     let tmp = tempfile::tempdir().unwrap();
     let t = Skein::new_at(tmp.path(), "imp");

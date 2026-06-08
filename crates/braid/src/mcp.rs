@@ -189,6 +189,24 @@ fn specs() -> Vec<ToolSpec> {
             },
         },
         ToolSpec {
+            name: "braid_dep_tree",
+            description: "Recursive parent-child descendant tree of a strand (epic → \
+                          subtasks). Returns a nested node {id, title, status, \
+                          dep_type, cycle, children}; closed children are included \
+                          and parent-child cycles are broken (cycle: true, not \
+                          expanded).",
+            tier: Tier::Query,
+            idempotent: true,
+            schema: || {
+                json!({
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                    "required": ["id"],
+                    "additionalProperties": false
+                })
+            },
+        },
+        ToolSpec {
             name: "braid_dep_cycles",
             description: "Report dependency cycles among blocking and parent-child edges.",
             tier: Tier::Query,
@@ -231,7 +249,16 @@ fn specs() -> Vec<ToolSpec> {
                             "type": "string",
                             "description": "Human-readable id segment: br-<slug>-<suffix>"
                         },
-                        "assignee": {"type": "string"}
+                        "assignee": {"type": "string"},
+                        "deps": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Dependencies to attach atomically, each \
+                                            as <type>:<target-id> (e.g. \
+                                            discovered-from:br-abc). The new strand \
+                                            depends on each target; a missing target \
+                                            fails the create."
+                        }
                     },
                     "required": ["title"],
                     "additionalProperties": false
@@ -548,6 +575,14 @@ impl BraidServer {
                 let p: P = serde_json::from_value(args)?;
                 Ok(serde_json::to_value(self.session.dep_list(&p.id)?)?)
             }
+            "braid_dep_tree" => {
+                #[derive(Deserialize)]
+                struct P {
+                    id: String,
+                }
+                let p: P = serde_json::from_value(args)?;
+                Ok(serde_json::to_value(self.session.dep_tree(&p.id)?)?)
+            }
             "braid_dep_cycles" => Ok(json!({"cycles": self.session.dep_cycles()?})),
             "braid_export" => Ok(json!({"jsonl": self.session.export_jsonl()?})),
             "braid_create" => {
@@ -563,8 +598,15 @@ impl BraidServer {
                     labels: Vec<String>,
                     slug: Option<String>,
                     assignee: Option<String>,
+                    #[serde(default)]
+                    deps: Vec<String>,
                 }
                 let p: P = serde_json::from_value(args)?;
+                let deps = p
+                    .deps
+                    .iter()
+                    .map(|s| ops::parse_dep_spec(s))
+                    .collect::<anyhow::Result<Vec<_>>>()?;
                 let result = self
                     .session
                     .create(ops::CreateOpts {
@@ -575,6 +617,7 @@ impl BraidServer {
                         labels: p.labels,
                         slug: p.slug,
                         assignee: p.assignee,
+                        deps,
                     })
                     .await?;
                 Ok(serde_json::to_value(result)?)
@@ -710,8 +753,10 @@ impl BraidServer {
                     jsonl: String,
                 }
                 let p: P = serde_json::from_value(args)?;
-                let issues = crate::import::parse_jsonl(&p.jsonl)?;
-                Ok(serde_json::to_value(self.session.import(&issues).await?)?)
+                let parsed = crate::import::parse_jsonl(&p.jsonl)?;
+                Ok(serde_json::to_value(
+                    self.session.import(&parsed.issues, parsed.skipped).await?,
+                )?)
             }
             other => anyhow::bail!("unknown tool: {other}"),
         }
