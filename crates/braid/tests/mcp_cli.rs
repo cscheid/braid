@@ -15,6 +15,23 @@ use tokio::process::{Child, ChildStdin, ChildStdout};
 
 const DEAD_SERVER: &str = "tcp://127.0.0.1:1";
 
+/// Re-add the system environment variables a spawned `braid` process needs
+/// on Windows after `env_clear()`. Without `SystemRoot` in particular,
+/// Winsock can't initialize, so any real network connection (dialing the
+/// in-process sync server in these tests) fails as "unreachable". These
+/// variables don't exist on Unix, so this expands to a harmless no-op
+/// there. Apply it after the `env_clear().env(...)` chain on any command
+/// that must reach the network.
+macro_rules! keep_system_env {
+    ($cmd:ident) => {{
+        for key in ["SystemRoot", "SystemDrive", "TEMP", "TMP"] {
+            if let Ok(val) = std::env::var(key) {
+                $cmd.env(key, val);
+            }
+        }
+    }};
+}
+
 struct Skein {
     home: PathBuf,
     work: PathBuf,
@@ -36,9 +53,9 @@ impl Skein {
             .env("PATH", std::env::var("PATH").unwrap())
             .env("HOME", &self.home)
             .env("BRAID_SYNC_TIMEOUT", "0.3")
-            .args(["init", "--name", "mcp-test", "--sync-server", server_url])
-            .assert()
-            .success();
+            .args(["init", "--name", "mcp-test", "--sync-server", server_url]);
+        keep_system_env!(c);
+        c.assert().success();
         let secret = std::fs::read_to_string(self.work.join(".braid.toml")).unwrap();
         let parsed: toml::Value = toml::from_str(&secret).unwrap();
         parsed["doc_id"].as_str().unwrap().to_string()
@@ -58,8 +75,8 @@ struct McpClient {
 
 impl McpClient {
     async fn spawn(skein: &Skein, extra_args: &[&str]) -> McpClient {
-        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_braid"))
-            .arg("mcp")
+        let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_braid"));
+        cmd.arg("mcp")
             .args(extra_args)
             .current_dir(&skein.work)
             .env_clear()
@@ -69,9 +86,9 @@ impl McpClient {
             .env("BRAID_AUTHOR", "mcp-agent")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn braid mcp");
+            .stderr(Stdio::null());
+        keep_system_env!(cmd);
+        let mut child = cmd.spawn().expect("spawn braid mcp");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
         let mut client = McpClient {
@@ -561,9 +578,9 @@ async fn long_lived_session_notices_rotation() {
         .env("PATH", std::env::var("PATH").unwrap())
         .env("HOME", &b.home)
         .env("BRAID_SYNC_TIMEOUT", "10")
-        .arg("rotate")
-        .assert()
-        .success();
+        .arg("rotate");
+    keep_system_env!(c);
+    c.assert().success();
 
     // the running server picks the rotation up over sync (bounded retries
     // while the change propagates)
@@ -679,9 +696,9 @@ async fn subscribed_resources_notify_on_remote_changes() {
         .env("PATH", std::env::var("PATH").unwrap())
         .env("HOME", &b.home)
         .env("BRAID_SYNC_TIMEOUT", "10")
-        .args(["create", "created remotely"])
-        .assert()
-        .success();
+        .args(["create", "created remotely"]);
+    keep_system_env!(c);
+    c.assert().success();
 
     let params = client
         .wait_for_notification("notifications/resources/updated", 20)
