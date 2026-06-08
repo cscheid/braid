@@ -339,6 +339,43 @@ fn ready_filters_by_label_assignee_and_type() {
 }
 
 #[test]
+fn list_and_ready_filter_by_priority() {
+    let (_tmp, t) = Skein::new();
+    let p0 = t.create(&["crit", "--priority", "0"]);
+    let p1 = t.create(&["high", "--priority", "1"]);
+    t.create(&["normal", "--priority", "2"]); // excluded by the filters below
+
+    let list_ids = |args: &[&str]| -> Vec<String> {
+        let mut full = vec!["list", "--json"];
+        full.extend_from_slice(args);
+        let out = t.braid().args(&full).assert().success();
+        let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+        json.as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect()
+    };
+
+    // exact single
+    assert_eq!(list_ids(&["--priority", "1"]), vec![p1.clone()]);
+    // OR across repeats; the listing is priority-sorted, so P0 precedes P1
+    assert_eq!(list_ids(&["--priority", "0", "--priority", "1"]), vec![p0.clone(), p1.clone()]);
+    // composes with other filters via AND → empty when nothing matches
+    assert_eq!(list_ids(&["--priority", "2", "--type", "bug"]), Vec::<String>::new());
+
+    // ready honors the same filter
+    let out = t.braid().args(["ready", "--json", "--priority", "0"]).assert().success();
+    let json: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let ready: Vec<String> =
+        json.as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect();
+    assert_eq!(ready, vec![p0.clone()]);
+
+    // out-of-range priority is rejected at parse time
+    t.braid()
+        .args(["list", "--priority", "9"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("9"));
+}
+
+#[test]
 fn parent_child_does_not_block_child_in_ready() {
     let (_tmp, t) = Skein::new();
     let epic = t.create(&["Epic", "--type", "epic"]);

@@ -96,8 +96,9 @@ URI) and re-read on notification.
   [the published JSON Schema](schemas/strand.schema.json).
 - `braid_list` and `braid_ready` accept optional field filters: `labels`
   (array — a strand must carry **all** of them), `assignee` (exact match;
-  unassigned strands never match), and `type`. `braid_list` additionally
-  takes `status` / `all`, mirroring the CLI flags.
+  unassigned strands never match), `type`, and `priority` (array of 0..=4 —
+  a strand matches if its priority is **any** of them). `braid_list`
+  additionally takes `status` / `all`, mirroring the CLI flags.
 - `braid_create` accepts an optional `deps` array of `<type>:<target-id>`
   strings (e.g. `discovered-from:br-abc`); the new strand depends on each
   target, attached atomically — a missing target fails the call and creates

@@ -479,7 +479,7 @@ async fn list_and_ready_accept_field_filters() {
     let a = client
         .call(
             "braid_create",
-            json!({"title": "A", "labels": ["x", "y"], "assignee": "alice", "type": "bug"}),
+            json!({"title": "A", "labels": ["x", "y"], "assignee": "alice", "type": "bug", "priority": 1}),
         )
         .await;
     let a_id = a["id"].as_str().unwrap().to_string();
@@ -511,6 +511,18 @@ async fn list_and_ready_accept_field_filters() {
     assert_eq!(strand_ids(&ready), vec![a_id.clone()]);
     let ready = client.call("braid_ready", json!({"assignee": "nobody"})).await;
     assert_eq!(strand_ids(&ready), Vec::<String>::new());
+
+    // priority filter: A is P1, B defaults to P2
+    let list = client.call("braid_list", json!({"priority": [1]})).await;
+    assert_eq!(strand_ids(&list), vec![a_id.clone()]);
+    // OR across the set; listing is priority-sorted so P1 (A) precedes P2 (B)
+    let list = client.call("braid_list", json!({"priority": [1, 2]})).await;
+    assert_eq!(strand_ids(&list), vec![a_id.clone(), b_id.clone()]);
+    let ready = client.call("braid_ready", json!({"priority": [2]})).await;
+    assert_eq!(strand_ids(&ready), vec![b_id.clone()]);
+    // out-of-range priority is a clean tool error
+    let err = client.call_expect_error("braid_list", json!({"priority": [9]})).await;
+    assert!(err.contains("out of range"), "got: {err}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

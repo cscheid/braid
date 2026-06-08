@@ -80,6 +80,10 @@ enum Cmd {
         /// Filter by issue type: task|bug|feature|epic|chore|docs|question
         #[arg(short = 't', long = "type")]
         issue_type: Option<String>,
+        /// Require one of these priorities 0..=4 (repeatable: a strand
+        /// matches if its priority is any of them)
+        #[arg(long = "priority", value_parser = clap::value_parser!(i64).range(0..=4))]
+        priority: Vec<i64>,
         #[arg(long)]
         json: bool,
     },
@@ -173,6 +177,10 @@ enum Cmd {
         /// Filter by issue type: task|bug|feature|epic|chore|docs|question
         #[arg(short = 't', long = "type")]
         issue_type: Option<String>,
+        /// Require one of these priorities 0..=4 (repeatable: a strand
+        /// matches if its priority is any of them)
+        #[arg(long = "priority", value_parser = clap::value_parser!(i64).range(0..=4))]
+        priority: Vec<i64>,
         #[arg(long)]
         json: bool,
     },
@@ -302,8 +310,9 @@ async fn main() {
             .await
         }
         Cmd::Show { id, json } => commands::show(&cwd, &id, json).await,
-        Cmd::List { status, all, label, assignee, issue_type, json } => {
-            let filter = commands::FilterOpts { labels: label, assignee, issue_type };
+        Cmd::List { status, all, label, assignee, issue_type, priority, json } => {
+            let filter =
+                commands::FilterOpts { labels: label, assignee, issue_type, priorities: priority };
             commands::list(&cwd, status, all, filter, json).await
         }
         Cmd::Update {
@@ -360,8 +369,9 @@ async fn main() {
             DepCmd::Tree { issue, json } => commands::dep_tree(&cwd, &issue, json).await,
             DepCmd::Cycles => commands::dep_cycles(&cwd).await,
         },
-        Cmd::Ready { label, assignee, issue_type, json } => {
-            let filter = commands::FilterOpts { labels: label, assignee, issue_type };
+        Cmd::Ready { label, assignee, issue_type, priority, json } => {
+            let filter =
+                commands::FilterOpts { labels: label, assignee, issue_type, priorities: priority };
             commands::ready(&cwd, filter, json).await
         }
         Cmd::Blocked { json } => commands::blocked(&cwd, json).await,
