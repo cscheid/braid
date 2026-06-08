@@ -75,6 +75,87 @@ fn dep_add_list_remove_round_trip() {
 }
 
 #[test]
+fn create_with_deps_links_atomically() {
+    let (_tmp, t) = Skein::new();
+    let parent = t.create(&["Parent task"]);
+
+    // one-shot create + link; direction is new-depends-on-target, matching
+    // beads' `--deps discovered-from:<parent>`.
+    let child = t.create(&["Discovered work", "--deps", &format!("discovered-from:{parent}")]);
+
+    let json = t.show_json(&child);
+    let deps = json["dependencies"].as_object().unwrap();
+    assert_eq!(deps.len(), 1);
+    let dep = deps.values().next().unwrap();
+    assert_eq!(dep["depends_on_id"], parent.as_str());
+    assert_eq!(dep["type"], "discovered-from");
+
+    // and it surfaces as an incoming edge on the parent
+    t.braid()
+        .args(["dep", "list", &parent])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&child).and(predicate::str::contains("discovered-from")));
+}
+
+#[test]
+fn create_with_multiple_deps_repeated_and_comma_separated() {
+    let (_tmp, t) = Skein::new();
+    let a = t.create(&["A"]);
+    let b = t.create(&["B"]);
+
+    // repeated flags
+    let x = t.create(&["X", "--deps", &format!("blocks:{a}"), "--deps", &format!("related:{b}")]);
+    assert_eq!(t.show_json(&x)["dependencies"].as_object().unwrap().len(), 2);
+
+    // comma-separated form, identical effect
+    let y = t.create(&["Y", "--deps", &format!("blocks:{a},related:{b}")]);
+    assert_eq!(t.show_json(&y)["dependencies"].as_object().unwrap().len(), 2);
+}
+
+#[test]
+fn create_deps_unknown_type_is_recorded_verbatim() {
+    let (_tmp, t) = Skein::new();
+    let a = t.create(&["A"]);
+    // braid's DependencyType tolerates unknowns (→ Other), like `dep add`.
+    let x = t.create(&["X", "--deps", &format!("weird:{a}")]);
+    let xj = t.show_json(&x);
+    let dep = xj["dependencies"].as_object().unwrap().values().next().unwrap();
+    assert_eq!(dep["type"], "weird");
+}
+
+#[test]
+fn create_deps_bad_format_errors_and_creates_nothing() {
+    let (_tmp, t) = Skein::new();
+    // format is validated before the session opens, so nothing is created
+    t.braid()
+        .args(["create", "X", "--deps", "notacolon"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("type").and(predicate::str::contains("notacolon")));
+
+    let out = t.braid().args(["list", "--all", "--json"]).assert().success();
+    let all: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(all.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn create_deps_missing_target_errors_atomically() {
+    let (_tmp, t) = Skein::new();
+    // a missing target is rejected like `dep add` (typo guard); critically,
+    // the strand is NOT created despite its title being valid.
+    t.braid()
+        .args(["create", "X", "--deps", "blocks:br-ghost99"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no issue"));
+
+    let out = t.braid().args(["list", "--all", "--json"]).assert().success();
+    let all: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert_eq!(all.as_array().unwrap().len(), 0);
+}
+
+#[test]
 fn dep_add_validates_targets_and_self_edges() {
     let (_tmp, t) = Skein::new();
     let a = t.create(&["Lonely"]);

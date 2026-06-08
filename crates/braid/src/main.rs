@@ -48,6 +48,11 @@ enum Cmd {
         slug: Option<String>,
         #[arg(long)]
         assignee: Option<String>,
+        /// Attach dependencies atomically as <type>:<target-id> (e.g.
+        /// discovered-from:br-abc). Repeatable and comma-separated; the new
+        /// strand depends on each target. A missing target fails the create.
+        #[arg(long = "deps", value_delimiter = ',')]
+        deps: Vec<String>,
         /// Print the full issue as JSON instead of just the id
         #[arg(long)]
         json: bool,
@@ -257,7 +262,17 @@ async fn main() {
             commands::init(&cwd, commands::InitOpts { name, prefix, join, sync_server, print_only })
                 .await
         }
-        Cmd::Create { title, description, issue_type, priority, label, slug, assignee, json } => {
+        Cmd::Create {
+            title,
+            description,
+            issue_type,
+            priority,
+            label,
+            slug,
+            assignee,
+            deps,
+            json,
+        } => {
             commands::create(
                 &cwd,
                 commands::CreateOpts {
@@ -268,6 +283,7 @@ async fn main() {
                     labels: label,
                     slug,
                     assignee,
+                    deps,
                     json,
                 },
             )

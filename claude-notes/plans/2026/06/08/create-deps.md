@@ -51,79 +51,95 @@ each element then split once on the first `:` into `(type, target)`.
   2026-06-08): match beads exactly** — other projects may run similar
   migrations, so beads parity is a hard requirement here, not just a
   convenience.
-- Apply deps **after** the strand is created, in order, reusing the
-  `dep_add` path. Do it within the same `Session` so it's one sync at the
-  end if practical; at minimum one logical operation from the user's view.
-- Surface any resulting cycle warning exactly as `dep add` does
-  (`DepAdded.cycles`), non-fatal.
-- `--json` output: keep printing the created strand; consider including the
-  added edges (or leave as-is and rely on `dep list`). Recommendation:
-  unchanged strand JSON for 0.3.0; note the edges in human output
-  (`created br-xyz (+2 deps)`).
+- Build the dep edges **inside `create` itself**, in the same write that
+  creates the strand (see Atomicity, below) — reusing `dep add`'s exact
+  primitives (`resolve_issue`, `DependencyType::from`, `Dependency::key`)
+  so validation/normalization is identical.
+- A freshly minted id can't be an existing target, so no self-edge is
+  possible at create time; and a brand-new strand's outgoing edges can't
+  close a cycle (nothing pointed at it yet) — so no cycle warning is needed
+  here, unlike `dep add`.
+- `--json` output: unchanged created-strand JSON (the deps are visible in
+  its `dependencies` map and via `dep list`). **Implemented as such.**
 
 ### Validation / errors
 
 - Bad format (no colon, e.g. `--deps notacolon`) → clear error naming the
-  offending token, **before** the strand is created (parse `--deps` up
-  front so we don't create a strand then fail).
-- Empty type or empty target → error.
-- Unknown dep type → allowed (→ `Other`), same as `dep add --type`; do not
-  reject (keeps parity and avoids fighting the tolerant schema).
-- Dangling target (id doesn't exist yet) → allowed, no hard fail.
+  offending token, **before** the session opens (parse `--deps` up front so
+  nothing is created). Empty type or empty target → same error.
+- Unknown dep type → allowed (→ `Other`), same as `dep add --type`; not
+  rejected (matches the tolerant schema). Silent, like `dep add`.
+- **Missing target → hard error, atomically (nothing created).** This is a
+  **corrected decision (2026-06-08)**: the plan originally said "dangling
+  targets are legal, no hard fail," but that conflated *import* (which
+  tolerates dangling, by design) with *`dep add`*, which actually
+  **rejects** a missing target as a typo guard (`dep_add_validates_targets_
+  and_self_edges` asserts failure with "no issue"). beads' own `create
+  --deps` warns-and-skips a missing target — but the user's beads-parity
+  requirement was specifically about *direction* (new→target), not the
+  failure mode. So `create --deps` follows braid's own strict, consistent
+  `dep add` behavior: a missing target is rejected with the same "no issue"
+  error. The schema's "dangling targets are legal" still holds for the
+  paths that intentionally allow it (import, merges); the interactive add
+  commands guard against accidental dangling.
 
-Open question: should an unknown dep type *warn*? `dep add` currently
-accepts silently. Recommendation: match `dep add` (silent) for parity;
-revisit globally if we ever tighten dep-type validation.
+### Atomicity
 
-### Atomicity note
-
-`create` then N× `dep_add` is not a single CRDT transaction, but braid has
-no atomic multi-op primitive and merges are conflict-free, so partial
-application on a mid-flight crash is acceptable and self-heals. Parsing
-`--deps` before creation prevents the only realistic "created but
-mis-specified" case.
+The edges are resolved and built **before** the strand is written, then the
+strand is created with its `dependencies` map already populated — a single
+`commit_one`. So a missing target on *any* dep fails the whole create with
+nothing persisted (no orphan strand, no partial edges). This is stronger
+than "create then N× `dep_add`" and avoids the partial-application window
+entirely.
 
 ## Where the code changes
 
-- **main.rs**: add `deps: Vec<String>` to `Create`; pass through.
-- **ops.rs**: add `deps: Vec<(String, String)>` (parsed) to `CreateOpts`,
-  *or* keep `CreateOpts` clean and have `commands::create` loop calling
-  `session.dep_add` after `session.create`. Recommendation: parse in the
-  command layer, loop `dep_add` — keeps `CreateOpts` a pure field bag and
-  reuses the exact validated path.
-- **commands.rs**: `create` printer parses/validates `--deps`, creates,
-  then applies edges; report count.
-- **mcp.rs**: extend `braid_create` schema with an optional `deps` array.
-  **Decided (Carlos, 2026-06-08): include in 0.3.0** — the splice is small
-  (one optional array property + a loop after create in the `braid_create`
-  dispatch arm, `mcp.rs:553-582`). Same `<type>:<target>` element format as
-  the CLI; update `docs/mcp.md`.
+- **main.rs**: `deps: Vec<String>` on `Create` (`#[arg(long = "deps",
+  value_delimiter = ',')]`); pass through. **Done.**
+- **ops.rs**: `pub fn parse_dep_spec(&str) -> Result<(String, String)>`
+  (shared by CLI + MCP); `deps: Vec<(String, String)>` on `CreateOpts`;
+  `create` resolves + builds the `dependencies` map before constructing the
+  Issue, then one `commit_one`. **Done.**
+- **commands.rs**: `create` parses/validates `--deps` via `parse_dep_spec`
+  up front (before opening the session), then passes the parsed pairs.
+  **Done.**
+- **mcp.rs**: `braid_create` schema gains an optional `deps` string array;
+  the dispatch arm parses via `parse_dep_spec` and passes through. Same
+  `<type>:<target>` element format as the CLI. `docs/mcp.md` updated.
+  **Done.**
 
 ## Test plan (write first — TDD)
 
-- [ ] `create "x" --deps discovered-from:<id>` → resulting strand's
-      `dep list` shows one outgoing edge to `<id>` typed `discovered-from`.
-- [ ] Multiple `--deps` (repeated flag) → multiple edges, correct types.
-- [ ] Comma-separated form → same result as repeated flags.
-- [ ] Bad format `--deps notacolon` → error naming the token; **no strand
-      created** (assert list count unchanged).
-- [ ] Dangling target (`--deps blocks:br-doesnotexist`) → succeeds; edge
-      recorded; strand is still `ready`/listed (never blocked by dangling).
-- [ ] Unknown type (`--deps weird:<id>`) → edge recorded with type `weird`
-      (round-trips), no error.
+- [x] `create "x" --deps discovered-from:<id>` → resulting strand's
+      `dep list` shows one outgoing edge to `<id>` typed `discovered-from`
+      (and incoming on the parent). [`create_with_deps_links_atomically`]
+- [x] Multiple `--deps` (repeated flag) and comma-separated → same edges.
+      [`create_with_multiple_deps_repeated_and_comma_separated`]
+- [x] Bad format `--deps notacolon` → error naming the token; **no strand
+      created**. [`create_deps_bad_format_errors_and_creates_nothing`]
+- [x] Missing target (`--deps blocks:br-ghost99`) → "no issue" error,
+      **nothing created** (atomic). [`create_deps_missing_target_errors_
+      atomically`] — supersedes the old "dangling succeeds" case (see the
+      corrected Validation decision above).
+- [x] Unknown type (`--deps weird:<id>`) → edge recorded with type `weird`.
+      [`create_deps_unknown_type_is_recorded_verbatim`]
+- [x] `parse_dep_spec` unit tests: split, trim, unknown-type, missing-colon,
+      empty-parts. [`ops::tests`]
+- [x] MCP: `braid_create` with `deps` attaches the edge; missing target
+      fails atomically. [`create_with_deps_attaches_edges_atomically`]
 
 ## Work items
 
-- [ ] Tests written and red.
-- [ ] `--deps` flag on `Create` (main.rs), repeatable + comma-delimited.
-- [ ] Up-front parse/validate `<type>:<target>`; create-then-link loop
-      reusing `dep_add`.
-- [ ] Human output reports added edges; cycle warnings preserved.
-- [ ] Extend `braid_create` MCP schema with `deps` + update `docs/mcp.md`.
-- [ ] `agents-info.md`: show the flag (and update the "file discovered
-      work" example to the one-shot form).
-- [ ] `create --help` lists `--deps` with the `<type>:<id>` syntax.
-- [ ] `cargo xtask ci` green.
+- [x] Tests written and red.
+- [x] `--deps` flag on `Create` (main.rs), repeatable + comma-delimited.
+- [x] `parse_dep_spec` + atomic edge-building in `ops::create` (reuses
+      `resolve_issue` / `DependencyType::from` / `Dependency::key`).
+- [x] Extend `braid_create` MCP schema with `deps` + update `docs/mcp.md`.
+- [x] `agents-info.md`: show the flag + update the "file discovered work"
+      example to the one-shot form.
+- [x] `create --help` lists `--deps` with the `<type>:<id>` syntax (clap
+      doc comment on the flag).
+- [x] `cargo xtask ci` green.
 
 ## Docs to touch (same commit)
 

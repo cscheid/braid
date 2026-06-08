@@ -384,6 +384,49 @@ async fn agent_workflow_end_to_end() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn create_with_deps_attaches_edges_atomically() {
+    let tmp = tempfile::tempdir().unwrap();
+    let skein = Skein::new(tmp.path(), "a");
+    skein.init(DEAD_SERVER);
+    let mut client = McpClient::spawn(&skein, &[]).await;
+
+    let parent = client.call("braid_create", json!({"title": "Parent"})).await;
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+
+    // deps: array of <type>:<id>; the new strand depends on the target
+    let child = client
+        .call(
+            "braid_create",
+            json!({"title": "Discovered", "deps": [format!("discovered-from:{parent_id}")]}),
+        )
+        .await;
+    let child_id = child["id"].as_str().unwrap().to_string();
+
+    let listing = client.call("braid_dep_list", json!({"id": child_id})).await;
+    let outgoing = listing["outgoing"].as_array().unwrap();
+    assert_eq!(outgoing.len(), 1);
+    assert_eq!(outgoing[0]["id"], parent_id.as_str());
+    assert_eq!(outgoing[0]["dep_type"], "discovered-from");
+
+    // a missing target is rejected (atomic): the strand is not created
+    let err = client
+        .call_expect_error(
+            "braid_create",
+            json!({"title": "Orphan", "deps": ["blocks:br-ghost99"]}),
+        )
+        .await;
+    assert!(err.contains("no issue"), "got: {err}");
+    let listed = client.call("braid_list", json!({"all": true})).await;
+    let titles: Vec<&str> = listed["strands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].as_str().unwrap())
+        .collect();
+    assert!(!titles.contains(&"Orphan"), "failed create must leave nothing behind");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn list_and_ready_accept_field_filters() {
     let tmp = tempfile::tempdir().unwrap();
     let skein = Skein::new(tmp.path(), "a");

@@ -231,7 +231,16 @@ fn specs() -> Vec<ToolSpec> {
                             "type": "string",
                             "description": "Human-readable id segment: br-<slug>-<suffix>"
                         },
-                        "assignee": {"type": "string"}
+                        "assignee": {"type": "string"},
+                        "deps": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Dependencies to attach atomically, each \
+                                            as <type>:<target-id> (e.g. \
+                                            discovered-from:br-abc). The new strand \
+                                            depends on each target; a missing target \
+                                            fails the create."
+                        }
                     },
                     "required": ["title"],
                     "additionalProperties": false
@@ -563,8 +572,15 @@ impl BraidServer {
                     labels: Vec<String>,
                     slug: Option<String>,
                     assignee: Option<String>,
+                    #[serde(default)]
+                    deps: Vec<String>,
                 }
                 let p: P = serde_json::from_value(args)?;
+                let deps = p
+                    .deps
+                    .iter()
+                    .map(|s| ops::parse_dep_spec(s))
+                    .collect::<anyhow::Result<Vec<_>>>()?;
                 let result = self
                     .session
                     .create(ops::CreateOpts {
@@ -575,6 +591,7 @@ impl BraidServer {
                         labels: p.labels,
                         slug: p.slug,
                         assignee: p.assignee,
+                        deps,
                     })
                     .await?;
                 Ok(serde_json::to_value(result)?)

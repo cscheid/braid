@@ -401,10 +401,16 @@ pub struct CreateOpts {
     pub labels: Vec<String>,
     pub slug: Option<String>,
     pub assignee: Option<String>,
+    /// Raw `<type>:<target-id>` dependency specs from `--deps`.
+    pub deps: Vec<String>,
     pub json: bool,
 }
 
 pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
+    // Validate dep specs up front, before opening the session: a malformed
+    // `--deps` must fail without creating anything.
+    let deps = opts.deps.iter().map(|s| ops::parse_dep_spec(s)).collect::<Result<Vec<_>>>()?;
+
     let session = Session::open(cwd).await?;
     let result = session
         .create(ops::CreateOpts {
@@ -415,6 +421,7 @@ pub async fn create(cwd: &Path, opts: CreateOpts) -> Result<()> {
             labels: opts.labels,
             slug: opts.slug,
             assignee: opts.assignee,
+            deps,
         })
         .await?;
     session.shutdown().await;

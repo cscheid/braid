@@ -42,13 +42,13 @@ braid comment <id> "found the root cause in foo.rs; fixing"
 braid close <id> --reason "fixed in commit abc123"
 ```
 
-File newly discovered work as you go:
+File newly discovered work as you go — `--deps` links it in one shot:
 
 ```sh
-new=$(braid create "Fix the frobnicator" \
+braid create "Fix the frobnicator" \
     --description "It frobs when it should nicate." \
-    --type bug --priority 1 --label frobnicator)
-braid dep add "$new" <current-strand-id> --type discovered-from
+    --type bug --priority 1 --label frobnicator \
+    --deps discovered-from:<current-strand-id>
 ```
 
 ## Command reference
@@ -60,7 +60,7 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid list [--status S] [--all] [--label L]... [--assignee A] [--type T] [--json]` | open (non-closed) strands; `--all` includes closed. Same field filters as `ready` |
 | `braid show <id> [--json]` | one strand (unique id fragments work: `braid show 6j42`) |
 | `braid search <text> [--json]` | case-insensitive substring over titles, prose, labels, comments |
-| `braid create <title> [flags]` | new strand; prints its id. Flags: `--description --type --priority --label --slug --assignee --json` |
+| `braid create <title> [flags]` | new strand; prints its id. Flags: `--description --type --priority --label --slug --assignee --deps --json`. `--deps <type>:<target-id>` attaches dependencies atomically (repeatable and comma-separated; the new strand depends on each target). A missing target fails the create, like `dep add` |
 | `braid update <id> [flags]` | change fields: `--title --description --design --acceptance-criteria --notes --status --priority --type --assignee --external-ref --add-label --remove-label`; empty string clears |
 | `braid close <id>... [--reason R] [--force]` | close; refuses if open children unless `--force` |
 | `braid reopen <id>...` | reopen closed strands |

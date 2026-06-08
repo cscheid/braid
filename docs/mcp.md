@@ -98,6 +98,10 @@ URI) and re-read on notification.
   (array — a strand must carry **all** of them), `assignee` (exact match;
   unassigned strands never match), and `type`. `braid_list` additionally
   takes `status` / `all`, mirroring the CLI flags.
+- `braid_create` accepts an optional `deps` array of `<type>:<target-id>`
+  strings (e.g. `discovered-from:br-abc`); the new strand depends on each
+  target, attached atomically — a missing target fails the call and creates
+  nothing.
 - `braid_import` recognizes beads tombstones (soft-deleted records:
   `status:"tombstone"` or a `deleted_at`/`delete_reason`/`deleted_by`
   marker) and skips them; its result reports both `imported` and `skipped`
