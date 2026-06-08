@@ -4,8 +4,9 @@ description: Cut a braid release (version bump + tag + verify). Use when the use
 ---
 
 Releases are tag-driven: pushing `vX.Y.Z` triggers `.github/workflows/release.yml`
-(4-target build → checksummed, minisign-signed tarballs → GitHub Release;
-artifact naming is a contract with `install.sh` and
+(5-target build → checksummed, minisign-signed archives → GitHub Release:
+.tar.gz for the four unix targets, .zip for Windows; artifact naming is a
+contract with `install.sh`, `install.ps1`, the Scoop manifest, and
 `crates/braid/tests/installer.rs`). The version in filenames has no `v`
 prefix; the tag does. Signing needs the `MINISIGN_SECRET_KEY` repo secret
 to match the public key pinned in `install.sh` (the sign step verifies
@@ -27,9 +28,10 @@ you're pushing.
 6. **Commit** `release: vX.Y.Z` and push to `origin/main`; wait for CI green.
 7. **Tag and push the tag**: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 8. **Watch the Release workflow** (`gh run watch`); then verify the release:
-   `gh release view vX.Y.Z` must show 13 assets — 4 platform tarballs
-   (`braid-X.Y.Z-{darwin,linux}_{arm64,amd64}.tar.gz`),
-   their 4 `.sha256` files, their 4 `.minisig` signatures, and
+   `gh release view vX.Y.Z` must show 16 assets — 5 platform archives
+   (`braid-X.Y.Z-{darwin,linux}_{arm64,amd64}.tar.gz` and
+   `braid-X.Y.Z-windows_amd64.zip`),
+   their 5 `.sha256` files, their 5 `.minisig` signatures, and
    `checksums.sha256`.
 9. **Record it in the skein**: `BRAID_AUTHOR=claude braid comment` on a
    relevant strand, or a release note comment; `braid sync`.

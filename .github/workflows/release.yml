@@ -87,15 +87,23 @@ jobs:
           - platform: linux_amd64
             target: x86_64-unknown-linux-musl
             os: ubuntu-latest
+            ext: tar.gz
           - platform: linux_arm64
             target: aarch64-unknown-linux-musl
             os: ubuntu-24.04-arm
+            ext: tar.gz
           - platform: darwin_amd64
             target: x86_64-apple-darwin
             os: macos-15  # arm64 runner; the x86_64 binary runs under Rosetta
+            ext: tar.gz
           - platform: darwin_arm64
             target: aarch64-apple-darwin
             os: macos-15
+            ext: tar.gz
+          - platform: windows_amd64
+            target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: zip
     steps:
       - uses: actions/checkout@v5
         with:
@@ -114,18 +122,25 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }} -p braid
 
       # Every target in the matrix can execute on its runner (musl
-      # binaries are static; darwin x86_64 runs under Rosetta), so the
-      # version check is unconditional.
+      # binaries are static; darwin x86_64 runs under Rosetta; windows runs
+      # natively), so the version check is unconditional. `shell: bash` uses
+      # Git Bash on the windows runner so this one script serves all OSes.
       - name: Verify binary reports the tag's version
+        shell: bash
         run: |
-          RAW=$(./target/${{ matrix.target }}/release/braid --version)
+          BIN="./target/${{ matrix.target }}/release/braid"
+          [ "$RUNNER_OS" = "Windows" ] && BIN="$BIN.exe"
+          RAW=$("$BIN" --version)
           ACTUAL="${RAW##* }"
           if [ "$ACTUAL" != "${{ needs.preflight.outputs.version }}" ]; then
             echo "::error::binary reports '$RAW', expected version ${{ needs.preflight.outputs.version }}"
             exit 1
           fi
 
-      - name: Package archive + checksum
+      # Unix targets ship a .tar.gz of the `braid` binary.
+      - name: Package archive + checksum (tar.gz)
+        if: matrix.ext == 'tar.gz'
+        shell: bash
         run: |
           ARCHIVE="braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz"
           tar -czf "$ARCHIVE" -C "target/${{ matrix.target }}/release" braid
@@ -137,23 +152,41 @@ jobs:
             shasum -a 256 -c "$ARCHIVE.sha256"
           fi
 
-      - name: Install minisign
+      # Windows ships a .zip of braid.exe (the format Windows users and
+      # Scoop/WinGet expect). The .sha256 is written in GNU coreutils format
+      # ("<lowercase-hash>  <file>", LF-terminated, no BOM) so the ubuntu
+      # combine job's `sha256sum -c` accepts it alongside the unix lines.
+      - name: Package archive + checksum (zip)
+        if: matrix.ext == 'zip'
+        shell: pwsh
         run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            brew install minisign
-          else
-            sudo apt-get update && sudo apt-get install -y minisign
-          fi
+          $version = "${{ needs.preflight.outputs.version }}"
+          $archive = "braid-$version-${{ matrix.platform }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/braid.exe" -DestinationPath $archive
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
+          [System.IO.File]::WriteAllText((Join-Path (Get-Location) "$archive.sha256"), "$hash  $archive`n")
+
+      - name: Install minisign
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            macOS)   brew install minisign ;;
+            Linux)   sudo apt-get update && sudo apt-get install -y minisign ;;
+            Windows) choco install minisign -y ;;
+          esac
 
       # Trusted comment = archive filename: it is part of the signed
-      # payload, and install.sh compares it against the file it asked
+      # payload, and the installers compare it against the file they asked
       # for, so a signature cannot be replayed from another artifact.
+      # `shell: bash` (Git Bash on Windows) keeps this one script for all
+      # OSes; minisign installed above is on PATH.
       - name: Sign archive (minisign, Ed25519)
+        shell: bash
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
         run: |
-          ARCHIVE="braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz"
-          key="$(mktemp "${RUNNER_TEMP}/minisign-key.XXXXXX")"
+          ARCHIVE="braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.${{ matrix.ext }}"
+          key="$(mktemp)"
           trap 'rm -f "$key"' EXIT
           chmod 600 "$key"
           printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
@@ -169,9 +202,9 @@ jobs:
         with:
           name: braid-${{ matrix.platform }}
           path: |
-            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz
-            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz.sha256
-            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz.minisig
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.${{ matrix.ext }}
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.${{ matrix.ext }}.sha256
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.${{ matrix.ext }}.minisig
           retention-days: 7
           if-no-files-found: error
 
@@ -196,10 +229,14 @@ jobs:
           cd artifacts
           VERSION="${{ needs.preflight.outputs.version }}"
           MISSING=()
-          for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
-            for f in "braid-${VERSION}-${platform}.tar.gz" \
-                     "braid-${VERSION}-${platform}.tar.gz.sha256" \
-                     "braid-${VERSION}-${platform}.tar.gz.minisig"; do
+          # "<platform>:<ext>" — Windows ships .zip, the rest .tar.gz.
+          for entry in linux_amd64:tar.gz linux_arm64:tar.gz \
+                       darwin_amd64:tar.gz darwin_arm64:tar.gz \
+                       windows_amd64:zip; do
+            platform="${entry%%:*}"; ext="${entry##*:}"
+            for f in "braid-${VERSION}-${platform}.${ext}" \
+                     "braid-${VERSION}-${platform}.${ext}.sha256" \
+                     "braid-${VERSION}-${platform}.${ext}.minisig"; do
               [ -f "$f" ] || MISSING+=("$f")
             done
           done
@@ -224,6 +261,12 @@ jobs:
             echo "curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.sh | bash"
             echo '```'
             echo
+            echo "On Windows (PowerShell):"
+            echo
+            echo '```powershell'
+            echo "irm https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/install.ps1 | iex"
+            echo '```'
+            echo
             echo "Or with cargo: \`cargo install --git https://github.com/${GITHUB_REPOSITORY} --tag ${TAG} braid\`"
             echo
             echo "| Platform | File |"
@@ -232,6 +275,7 @@ jobs:
             echo "| Linux ARM64 (static musl) | \`braid-${VERSION}-linux_arm64.tar.gz\` |"
             echo "| macOS Intel | \`braid-${VERSION}-darwin_amd64.tar.gz\` |"
             echo "| macOS Apple Silicon | \`braid-${VERSION}-darwin_arm64.tar.gz\` |"
+            echo "| Windows x86_64 | \`braid-${VERSION}-windows_amd64.zip\` |"
             echo
             echo "**Verify a manual download** (archives are signed with [minisign](https://jedisct1.github.io/minisign/), Ed25519):"
             echo

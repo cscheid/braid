@@ -66,6 +66,29 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Exercise install.ps1 end to end without a published release: zip the
+      # just-built braid.exe, then install it from that local artifact with
+      # checksum verification. Mirrors how tests/installer.rs proves
+      # install.sh offline. (The release.yml zip/sign path is exercised at
+      # tag time.)
+      - name: Smoke-test install.ps1 (offline)
+        shell: pwsh
+        run: |
+          $dir = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'ps-smoke')
+          $zip = Join-Path $dir 'braid-0.0.0-test-windows_amd64.zip'
+          Compress-Archive -Path 'target/debug/braid.exe' -DestinationPath $zip
+          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+          $dest = Join-Path $dir 'bin'
+          ./install.ps1 -ArtifactUrl $zip -Checksum $hash -Dest $dest
+          $out = & (Join-Path $dest 'braid.exe') --version
+          if ($out -notmatch '^braid ') { Write-Error "unexpected --version output: $out"; exit 1 }
+          Write-Host "install.ps1 smoke test OK: $out"
+          # A wrong checksum must be rejected.
+          $bad = '0' * 64
+          $failed = $false
+          try { ./install.ps1 -ArtifactUrl $zip -Checksum $bad -Dest $dest } catch { $failed = $true }
+          if (-not $failed) { Write-Error 'install.ps1 accepted a bad checksum'; exit 1 }
+          Write-Host 'install.ps1 rejects a bad checksum: OK'
 
   # Gate for the static-musl release targets (see
   # claude-notes/plans/2026/06/04/installer.md): musl breakage tends to
