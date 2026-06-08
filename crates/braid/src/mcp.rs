@@ -710,8 +710,10 @@ impl BraidServer {
                     jsonl: String,
                 }
                 let p: P = serde_json::from_value(args)?;
-                let issues = crate::import::parse_jsonl(&p.jsonl)?;
-                Ok(serde_json::to_value(self.session.import(&issues).await?)?)
+                let parsed = crate::import::parse_jsonl(&p.jsonl)?;
+                Ok(serde_json::to_value(
+                    self.session.import(&parsed.issues, parsed.skipped).await?,
+                )?)
             }
             other => anyhow::bail!("unknown tool: {other}"),
         }

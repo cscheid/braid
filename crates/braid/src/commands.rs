@@ -809,15 +809,22 @@ pub async fn import(cwd: &Path, path: &Path) -> Result<()> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     // Parse everything before touching the document: imports are atomic.
-    let issues = crate::import::parse_jsonl(&text)?;
+    let parsed = crate::import::parse_jsonl(&text)?;
 
     let session = Session::open(cwd).await?;
-    let result = session.import(&issues).await;
+    let result = session.import(&parsed.issues, parsed.skipped).await;
     session.shutdown().await;
     let result = result?;
     warn_unconfirmed(&result.sync);
 
-    println!("imported {} strands from {}", result.value.imported, path.display());
+    let imported = result.value.imported;
+    let skipped = result.value.skipped;
+    if skipped > 0 {
+        let noun = if skipped == 1 { "tombstone" } else { "tombstones" };
+        println!("imported {imported} strands (skipped {skipped} {noun}) from {}", path.display());
+    } else {
+        println!("imported {imported} strands from {}", path.display());
+    }
     Ok(())
 }
 

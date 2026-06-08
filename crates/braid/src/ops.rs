@@ -101,6 +101,10 @@ pub struct Reopened {
 #[derive(Debug, Serialize)]
 pub struct Imported {
     pub imported: usize,
+    /// beads tombstones recognized and skipped during parsing (never
+    /// upserted). The session does not compute this — parsing does — so it
+    /// is passed in and carried through to the caller's report.
+    pub skipped: usize,
 }
 
 /// Skein metadata safe for any consumer: excludes the rotation fields
@@ -782,8 +786,10 @@ impl Session {
     }
 
     /// Upsert pre-parsed strands (per-issue transactions: reads inside one
-    /// giant automerge transaction are severely superlinear).
-    pub async fn import(&self, issues: &[Issue]) -> Result<Mutated<Imported>> {
+    /// giant automerge transaction are severely superlinear). `skipped` is
+    /// the count of beads tombstones the parse step dropped; it is reported
+    /// back verbatim, not recomputed here.
+    pub async fn import(&self, issues: &[Issue], skipped: usize) -> Result<Mutated<Imported>> {
         self.guard_rotation()?;
         self.opened.doc.with_document(|d| {
             for issue in issues {
@@ -792,6 +798,6 @@ impl Session {
             Ok::<_, braid_core::amdoc::ReconcileError>(())
         })?;
         let sync = self.opened.push().await;
-        Ok(Mutated { value: Imported { imported: issues.len() }, sync })
+        Ok(Mutated { value: Imported { imported: issues.len(), skipped }, sync })
     }
 }

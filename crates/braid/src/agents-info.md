@@ -77,7 +77,7 @@ braid dep add "$new" <current-strand-id> --type discovered-from
 | `braid rotate` | move the skein to a fresh document (sheds history); stale clones are told to `--adopt`. **Only run when a human asks** |
 | `braid rotate --revoke` | rotation for a *leaked* doc id: no forwarding pointer is written; the new secret must be distributed out-of-band. **Only run when a human asks** |
 | `braid rotate --adopt` | follow a rotation: switch this clone to the successor skein (stragglers written to `.braid-stragglers.jsonl` for review) |
-| `braid import <file>` | import strands from JSONL (beads or braid format) |
+| `braid import <file>` | import strands from JSONL (beads or braid format); beads tombstones (soft-deleted records) are recognized and skipped, reported as `(skipped N tombstones)` |
 | `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |
 
