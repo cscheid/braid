@@ -118,6 +118,14 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
+      # Defender real-time scanning inspects every object/rlib/exe the
+      # compiler writes; excluding the workspace cuts the MSVC build time
+      # markedly (the Windows job runs ~5x longer than the Unix matrix).
+      - name: Exclude workspace from Defender scanning
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath "${{ github.workspace }}"
+
       - name: Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }} -p braid
 
