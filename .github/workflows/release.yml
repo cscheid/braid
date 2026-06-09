@@ -167,20 +167,21 @@ jobs:
           [System.IO.File]::WriteAllText((Join-Path (Get-Location) "$archive.sha256"), "$hash  $archive`n")
 
       - name: Install minisign
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           case "$RUNNER_OS" in
-            macOS)   brew install minisign ;;
-            Linux)   sudo apt-get update && sudo apt-get install -y minisign ;;
-            Windows) choco install minisign -y ;;
+            macOS)  brew install minisign ;;
+            Linux)  sudo apt-get update && sudo apt-get install -y minisign ;;
           esac
 
       # Trusted comment = archive filename: it is part of the signed
-      # payload, and the installers compare it against the file they asked
+      # payload, and install.sh compares it against the file they asked
       # for, so a signature cannot be replayed from another artifact.
-      # `shell: bash` (Git Bash on Windows) keeps this one script for all
-      # OSes; minisign installed above is on PATH.
+      # Skipped for Windows: install.ps1 does not verify signatures (SHA-256
+      # only), so the .zip has no .minisig consumer today.
       - name: Sign archive (minisign, Ed25519)
+        if: runner.os != 'Windows'
         shell: bash
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
@@ -198,13 +199,25 @@ jobs:
           test -n "$PUBKEY"
           minisign -Vm "$ARCHIVE" -P "$PUBKEY"
 
+      # Unix archives include a .minisig; the Windows zip does not (no consumer).
       - uses: actions/upload-artifact@v7
+        if: matrix.ext == 'tar.gz'
         with:
           name: braid-${{ matrix.platform }}
           path: |
-            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.${{ matrix.ext }}
-            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.${{ matrix.ext }}.sha256
-            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.${{ matrix.ext }}.minisig
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz.sha256
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.tar.gz.minisig
+          retention-days: 7
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.ext == 'zip'
+        with:
+          name: braid-${{ matrix.platform }}
+          path: |
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.zip
+            braid-${{ needs.preflight.outputs.version }}-${{ matrix.platform }}.zip.sha256
           retention-days: 7
           if-no-files-found: error
 
@@ -230,13 +243,15 @@ jobs:
           VERSION="${{ needs.preflight.outputs.version }}"
           MISSING=()
           # "<platform>:<ext>" — Windows ships .zip, the rest .tar.gz.
+          # The .zip has no .minisig: install.ps1 does not verify signatures.
           for entry in linux_amd64:tar.gz linux_arm64:tar.gz \
                        darwin_amd64:tar.gz darwin_arm64:tar.gz \
                        windows_amd64:zip; do
             platform="${entry%%:*}"; ext="${entry##*:}"
-            for f in "braid-${VERSION}-${platform}.${ext}" \
-                     "braid-${VERSION}-${platform}.${ext}.sha256" \
-                     "braid-${VERSION}-${platform}.${ext}.minisig"; do
+            required=("braid-${VERSION}-${platform}.${ext}" \
+                      "braid-${VERSION}-${platform}.${ext}.sha256")
+            [ "$ext" != "zip" ] && required+=("braid-${VERSION}-${platform}.${ext}.minisig")
+            for f in "${required[@]}"; do
               [ -f "$f" ] || MISSING+=("$f")
             done
           done
@@ -277,14 +292,14 @@ jobs:
             echo "| macOS Apple Silicon | \`braid-${VERSION}-darwin_arm64.tar.gz\` |"
             echo "| Windows x86_64 | \`braid-${VERSION}-windows_amd64.zip\` |"
             echo
-            echo "**Verify a manual download** (archives are signed with [minisign](https://jedisct1.github.io/minisign/), Ed25519):"
+            echo "**Verify a manual download** (Unix archives are signed with [minisign](https://jedisct1.github.io/minisign/), Ed25519):"
             echo
             echo '```sh'
             echo "minisign -Vm braid-${VERSION}-<platform>.tar.gz -P RWSbWhSzVkkTRO4nFMzL/KyRs9oicbgy/2KPRK+o9hxznRYx9ZkHwwlN"
             echo '```'
             echo
             echo "The trusted comment should name exactly the file you downloaded."
-            echo "Checksums only (no authenticity): \`sha256sum -c checksums.sha256 --ignore-missing\`"
+            echo "Checksums (all platforms): \`sha256sum -c checksums.sha256 --ignore-missing\`"
             echo
             echo "## Changes"
             echo
@@ -311,5 +326,4 @@ jobs:
             artifacts/braid-*.tar.gz artifacts/braid-*.tar.gz.sha256 \
             artifacts/braid-*.tar.gz.minisig \
             artifacts/braid-*.zip artifacts/braid-*.zip.sha256 \
-            artifacts/braid-*.zip.minisig \
             artifacts/checksums.sha256
