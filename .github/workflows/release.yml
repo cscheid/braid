@@ -2,7 +2,7 @@
 # 4-target binary build → checksummed artifacts → GitHub Release.
 #
 # The artifact naming and checksum layout is a contract with install.sh
-# (and is what crates/braid/tests/installer.rs encodes):
+# (and is what crates/braid/tests/bootstrap_sh.rs encodes):
 #
 #   braid-<version>-<platform>.tar.gz          single member: braid
 #   braid-<version>-<platform>.tar.gz.sha256   "<sha256>  <filename>"

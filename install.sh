@@ -26,7 +26,7 @@
 #     --insecure-skip-signature is the explicit escape hatch.
 #   - Linux binaries are statically linked against musl, so one artifact
 #     per architecture covers every distro, Alpine included.
-#   - Tested by crates/braid/tests/installer.rs, offline, through
+#   - Tested by crates/braid/tests/bootstrap_sh.rs, offline, through
 #     --artifact-url file:// + --checksum.
 
 set -euo pipefail
