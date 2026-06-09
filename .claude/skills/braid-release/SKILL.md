@@ -6,8 +6,8 @@ description: Cut a braid release (version bump + tag + verify). Use when the use
 Releases are tag-driven: pushing `vX.Y.Z` triggers `.github/workflows/release.yml`
 (5-target build → checksummed, minisign-signed archives → GitHub Release:
 .tar.gz for the four unix targets, .zip for Windows; artifact naming is a
-contract with `install.sh`, `install.ps1`, the Scoop manifest, and
-`crates/braid/tests/installer.rs`). The version in filenames has no `v`
+contract with `install.sh`, `install.ps1`, and
+`crates/braid/tests/bootstrap_sh.rs`). The version in filenames has no `v`
 prefix; the tag does. Signing needs the `MINISIGN_SECRET_KEY` repo secret
 to match the public key pinned in `install.sh` (the sign step verifies
 this and fails the release on mismatch).
