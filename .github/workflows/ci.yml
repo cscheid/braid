@@ -68,7 +68,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # Exercise install.ps1 end to end without a published release: zip the
       # just-built braid.exe, then install it from that local artifact with
-      # checksum verification. Mirrors how tests/installer.rs proves
+      # checksum verification. Mirrors how tests/bootstrap_sh.rs proves
       # install.sh offline. (The release.yml zip/sign path is exercised at
       # tag time.)
       - name: Smoke-test install.ps1 (offline)

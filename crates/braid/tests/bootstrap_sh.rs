@@ -14,6 +14,13 @@
 //! PATH rather than by parsing the script.
 //!
 //! Plan: claude-notes/plans/2026/06/04/installer.md (strand br-iju0n3gd)
+//!
+//! Filename note: this test target must not contain `install`/`setup`/
+//! `update`/`patch` in its name. Windows UAC installer-detection refuses to
+//! launch any exe whose filename matches that heuristic without elevation
+//! (os error 740), so `cargo test` would fail on Windows even though the
+//! suite is `cfg(unix)` and compiles to an empty binary there. Hence
+//! `bootstrap_sh`, not `installer`.
 
 #![cfg(unix)]
 
