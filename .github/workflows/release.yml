@@ -309,4 +309,7 @@ jobs:
             --verify-tag \
             "${PRERELEASE[@]}" \
             artifacts/braid-*.tar.gz artifacts/braid-*.tar.gz.sha256 \
-            artifacts/braid-*.tar.gz.minisig artifacts/checksums.sha256
+            artifacts/braid-*.tar.gz.minisig \
+            artifacts/braid-*.zip artifacts/braid-*.zip.sha256 \
+            artifacts/braid-*.zip.minisig \
+            artifacts/checksums.sha256
