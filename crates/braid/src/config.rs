@@ -56,17 +56,46 @@ pub struct ConfigInputs {
     pub repo_file: Option<(PathBuf, FileConfig)>,
     /// Nearest `.braid-project` marker walking up from cwd: (path, name).
     pub project_marker: Option<(PathBuf, String)>,
-    pub user_config: Option<UserConfig>,
+    /// User-level config with the path it was read from (honoring XDG), so
+    /// diagnostics can point at the exact file.
+    pub user_config: Option<(PathBuf, UserConfig)>,
     pub git_user_name: Option<String>,
     pub os_user: Option<String>,
 }
 
-/// Where the winning `doc_id` came from (for diagnostics).
+/// Where a resolved field came from, for diagnostics (`braid config`,
+/// `braid secret`). `doc_id` can only ever be `Env`/`RepoFile`/`UserConfig`;
+/// `sync_server` adds `Default`; `author` adds `GitConfig`/`OsUser`/`Default`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SecretSource {
-    Env,
+pub enum Source {
+    /// An environment variable, named (e.g. `BRAID_DOC_ID`).
+    Env(String),
+    /// A `.braid.toml` at this path.
     RepoFile(PathBuf),
-    UserConfig { project: String },
+    /// The `[projects.<project>]` table in the user config at this path.
+    UserConfig { project: String, path: PathBuf },
+    /// `git config user.name` (author only).
+    GitConfig,
+    /// The OS username, `$USER` / `$USERNAME` (author only).
+    OsUser,
+    /// A built-in default: the sync server, or the `"unknown"` author.
+    Default,
+}
+
+impl Source {
+    /// Human-readable provenance for CLI output.
+    pub fn describe(&self) -> String {
+        match self {
+            Source::Env(var) => format!("{var} environment variable"),
+            Source::RepoFile(path) => path.display().to_string(),
+            Source::UserConfig { project, path } => {
+                format!("{} [projects.{project}]", path.display())
+            }
+            Source::GitConfig => "git config user.name".to_string(),
+            Source::OsUser => "OS username ($USER / $USERNAME)".to_string(),
+            Source::Default => "built-in default".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -74,7 +103,9 @@ pub struct ResolvedConfig {
     pub doc_id: DocId,
     pub sync_server: String,
     pub author: String,
-    pub doc_id_source: SecretSource,
+    pub doc_id_source: Source,
+    pub sync_server_source: Source,
+    pub author_source: Source,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -114,23 +145,28 @@ pub enum ConfigError {
 
 /// Pure, per-field layered resolution. See module docs for the layering.
 pub fn resolve(inputs: &ConfigInputs) -> Result<ResolvedConfig, ConfigError> {
-    // The user-config layer applies only when a marker names a project.
-    let project_cfg: Option<(&str, &FileConfig)> = match &inputs.project_marker {
+    // The user-config layer applies only when a marker names a project. Carry
+    // the config's path so winning user-config fields can name their source.
+    let project_cfg: Option<(&Path, &str, &FileConfig)> = match &inputs.project_marker {
         Some((_, name)) => inputs
             .user_config
             .as_ref()
-            .and_then(|uc| uc.projects.get(name))
-            .map(|cfg| (name.as_str(), cfg)),
+            .and_then(|(path, uc)| uc.projects.get(name).map(|cfg| (path.as_path(), name, cfg)))
+            .map(|(path, name, cfg)| (path, name.as_str(), cfg)),
         None => None,
+    };
+    let user_source = |project: &str, path: &Path| Source::UserConfig {
+        project: project.to_string(),
+        path: path.to_path_buf(),
     };
 
     // doc_id: env > repo file > user config (via marker).
     let (doc_id, doc_id_source) = if let Some(id) = &inputs.env_doc_id {
-        (id.clone(), SecretSource::Env)
+        (id.clone(), Source::Env("BRAID_DOC_ID".to_string()))
     } else if let Some((path, FileConfig { doc_id: Some(id), .. })) = &inputs.repo_file {
-        (id.clone(), SecretSource::RepoFile(path.clone()))
-    } else if let Some((project, FileConfig { doc_id: Some(id), .. })) = project_cfg {
-        (id.clone(), SecretSource::UserConfig { project: project.to_string() })
+        (id.clone(), Source::RepoFile(path.clone()))
+    } else if let Some((path, project, FileConfig { doc_id: Some(id), .. })) = project_cfg {
+        (id.clone(), user_source(project, path))
     } else if let Some((marker, project)) = &inputs.project_marker {
         // A marker promised a project, but the user config doesn't deliver
         // a doc_id for it — that deserves a more specific error than the
@@ -144,25 +180,40 @@ pub fn resolve(inputs: &ConfigInputs) -> Result<ResolvedConfig, ConfigError> {
         return Err(ConfigError::NoDocId);
     };
 
-    let repo_cfg = inputs.repo_file.as_ref().map(|(_, cfg)| cfg);
+    // sync_server: env > repo file > user config > built-in default.
+    let (sync_server, sync_server_source) = if let Some(v) = &inputs.env_sync_url {
+        (v.clone(), Source::Env("BRAID_SYNC_URL".to_string()))
+    } else if let Some((path, FileConfig { sync_server: Some(v), .. })) = &inputs.repo_file {
+        (v.clone(), Source::RepoFile(path.clone()))
+    } else if let Some((path, project, FileConfig { sync_server: Some(v), .. })) = project_cfg {
+        (v.clone(), user_source(project, path))
+    } else {
+        (DEFAULT_SYNC_SERVER.to_string(), Source::Default)
+    };
 
-    let sync_server = inputs
-        .env_sync_url
-        .clone()
-        .or_else(|| repo_cfg.and_then(|c| c.sync_server.clone()))
-        .or_else(|| project_cfg.and_then(|(_, c)| c.sync_server.clone()))
-        .unwrap_or_else(|| DEFAULT_SYNC_SERVER.to_string());
+    // author: env > repo file > user config > git config > OS user > unknown.
+    let (author, author_source) = if let Some(v) = &inputs.env_author {
+        (v.clone(), Source::Env("BRAID_AUTHOR".to_string()))
+    } else if let Some((path, FileConfig { author: Some(v), .. })) = &inputs.repo_file {
+        (v.clone(), Source::RepoFile(path.clone()))
+    } else if let Some((path, project, FileConfig { author: Some(v), .. })) = project_cfg {
+        (v.clone(), user_source(project, path))
+    } else if let Some(v) = &inputs.git_user_name {
+        (v.clone(), Source::GitConfig)
+    } else if let Some(v) = &inputs.os_user {
+        (v.clone(), Source::OsUser)
+    } else {
+        ("unknown".to_string(), Source::Default)
+    };
 
-    let author = inputs
-        .env_author
-        .clone()
-        .or_else(|| repo_cfg.and_then(|c| c.author.clone()))
-        .or_else(|| project_cfg.and_then(|(_, c)| c.author.clone()))
-        .or_else(|| inputs.git_user_name.clone())
-        .or_else(|| inputs.os_user.clone())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    Ok(ResolvedConfig { doc_id: DocId::new(doc_id), sync_server, author, doc_id_source })
+    Ok(ResolvedConfig {
+        doc_id: DocId::new(doc_id),
+        sync_server,
+        author,
+        doc_id_source,
+        sync_server_source,
+        author_source,
+    })
 }
 
 fn non_blank(v: Option<String>) -> Option<String> {
@@ -212,7 +263,10 @@ pub fn gather_fs(
     };
 
     let user_config = match user_config_path(env) {
-        Some(path) if path.is_file() => Some(parse_toml::<UserConfig>(&path)?),
+        Some(path) if path.is_file() => {
+            let cfg = parse_toml::<UserConfig>(&path)?;
+            Some((path, cfg))
+        }
         _ => None,
     };
 

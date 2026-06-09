@@ -205,6 +205,8 @@ enum Cmd {
     },
     /// Print the skein secret (doc id + sync server) — grants read/write access; share deliberately
     Secret,
+    /// Show the resolved configuration and where each field came from (doc id redacted) — for debugging which file/layer braid is using
+    Config,
     /// Import strands from a JSONL file (beads or braid format); upserts by id
     Import { path: std::path::PathBuf },
     /// Export all strands as JSONL to stdout
@@ -384,6 +386,7 @@ async fn main() {
             }
         },
         Cmd::Secret => commands::secret(&cwd),
+        Cmd::Config => commands::config(&cwd),
         Cmd::Rotate { revoke, adopt } => {
             if adopt {
                 commands::rotate_adopt(&cwd).await

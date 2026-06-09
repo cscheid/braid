@@ -15,7 +15,7 @@ use braid_core::schema::{Issue, IssueType, SCHEMA_VERSION, SkeinMetadata};
 use braid_core::time::now_rfc3339;
 use samod::DocumentId;
 
-use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME, SecretSource};
+use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME, Source};
 use crate::ops::{self, Session};
 use crate::skein::{PushOutcome, open_repo, open_skein, open_skein_unchecked};
 use crate::sync::{Connect, connect, sync_timeout};
@@ -131,8 +131,30 @@ pub async fn init(cwd: &Path, opts: InitOpts) -> Result<()> {
 pub fn secret(cwd: &Path) -> Result<()> {
     let cfg = crate::config::load(cwd)?;
     eprintln!("braid: this output grants read/write access to the skein — share deliberately");
+    eprintln!("braid: doc_id resolved from {}", cfg.doc_id_source.describe());
     println!("doc_id = \"{}\"", cfg.doc_id.expose_secret());
     println!("sync_server = \"{}\"", cfg.sync_server);
+    Ok(())
+}
+
+/// Print the resolved configuration and where each field came from — a
+/// safe-to-run diagnostic for "which file/layer is braid using?". The doc id
+/// is a bearer secret, so only a redacted prefix is shown; full disclosure
+/// stays with `braid secret`.
+pub fn config(cwd: &Path) -> Result<()> {
+    let cfg = crate::config::load(cwd)?;
+    println!(
+        "braid resolved configuration (first hit wins across env > .braid.toml > user config):"
+    );
+    println!();
+    println!("  doc_id       {}", cfg.doc_id.redacted());
+    println!("    from {}", cfg.doc_id_source.describe());
+    println!("  sync_server  {}", cfg.sync_server);
+    println!("    from {}", cfg.sync_server_source.describe());
+    println!("  author       {}", cfg.author);
+    println!("    from {}", cfg.author_source.describe());
+    println!();
+    println!("run `braid secret` to reveal the full doc id (grants read/write access)");
     Ok(())
 }
 
@@ -168,22 +190,27 @@ fn write_secret_file(path: &Path, doc_id: &str, sync_server: &str) -> Result<()>
 /// the paste-ready TOML (the operator needs the new secret, so this is a
 /// deliberate disclosure, flagged on stderr — same contract as
 /// `braid secret`).
-fn switch_config_to(source: &SecretSource, new_doc_id: &str, sync_server: &str) -> Result<()> {
+fn switch_config_to(source: &Source, new_doc_id: &str, sync_server: &str) -> Result<()> {
     match source {
-        SecretSource::RepoFile(path) => {
+        Source::RepoFile(path) => {
             write_secret_file(path, new_doc_id, sync_server)?;
             println!("updated {}", path.display());
         }
         other => {
+            // doc_id can only resolve from env, repo file, or user config;
+            // the remaining `Source` variants never reach here.
             let what = match other {
-                SecretSource::Env => "the BRAID_DOC_ID environment variable",
-                SecretSource::UserConfig { project } => {
-                    eprintln!(
-                        "braid: update [projects.{project}] in ~/.config/braid/projects.toml"
-                    );
+                Source::Env(var) => {
+                    eprintln!("braid: update the {var} environment variable");
+                    "an environment variable"
+                }
+                Source::UserConfig { project, path } => {
+                    eprintln!("braid: update [projects.{project}] in {}", path.display());
                     "your user-level config"
                 }
-                SecretSource::RepoFile(_) => unreachable!(),
+                Source::RepoFile(_) | Source::GitConfig | Source::OsUser | Source::Default => {
+                    unreachable!("doc_id never resolves from {other:?}")
+                }
             };
             eprintln!(
                 "braid: this clone's doc id comes from {what}, which braid cannot \

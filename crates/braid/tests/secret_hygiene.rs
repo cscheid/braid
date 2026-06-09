@@ -119,6 +119,21 @@ fn braid_secret_warns_on_stderr() {
 }
 
 #[test]
+fn braid_secret_names_the_source_on_stderr() {
+    // diagnostic provenance: secret should say which file/layer the doc id
+    // came from, on stderr so stdout stays cleanly pasteable
+    let (_tmp, t) = Skein::new();
+    t.init();
+    let out = t.braid().arg("secret").assert().success();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    // init wrote a .braid.toml here, so that is the resolved source
+    assert!(
+        stderr.contains(".braid.toml"),
+        "braid secret stderr should name the resolved source file:\n{stderr}"
+    );
+}
+
+#[test]
 fn agents_info_documents_the_secret_command() {
     let (_tmp, t) = Skein::new();
     let out = t.braid().arg("agents-info").assert().success();

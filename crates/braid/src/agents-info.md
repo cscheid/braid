@@ -20,6 +20,11 @@ braid finds its skein via, in order (first hit wins):
 3. `~/.config/braid/projects.toml`, selected by a committed
    `.braid-project` marker file naming a project
 
+Run `braid config` to see what resolved and from which file/layer (the doc
+id is redacted) — handy when a directory has no `.braid.toml` but braid
+still works (its doc id is coming from the user config via a `.braid-project`
+marker, or from the environment).
+
 If one of these is in place, every command just works. Otherwise:
 
 - new skein: `braid init` (then commit nothing — see the warning below)
@@ -82,6 +87,7 @@ braid create "Fix the frobnicator" \
 | `braid dep tree <id> [--json]` | recursive parent-child descendant tree (epic → subtasks); each node shows status, closed children included, cycles broken with a `(cycle)` marker |
 | `braid dep cycles` | report dependency cycles |
 | `braid sync` | force a sync; fails when the server is unreachable |
+| `braid config` | show the resolved doc id (redacted), sync server, and author, each with the file/layer it came from — diagnose which config braid is using. Safe to run; does not disclose the secret |
 | `braid secret` | print the full doc id + sync server (paste-ready TOML). **Grants read/write access** — only run when a human asks |
 | `braid rotate` | move the skein to a fresh document (sheds history); stale clones are told to `--adopt`. **Only run when a human asks** |
 | `braid rotate --revoke` | rotation for a *leaked* doc id: no forwarding pointer is written; the new secret must be distributed out-of-band. **Only run when a human asks** |

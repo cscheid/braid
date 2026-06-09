@@ -22,6 +22,20 @@ fn user_cfg(entries: &[(&str, FileConfig)]) -> UserConfig {
     }
 }
 
+/// Canonical user-config path used in resolve() tables.
+const USER_CFG_PATH: &str = "/home/u/.config/braid/projects.toml";
+
+/// A `(path, UserConfig)` pair as [`ConfigInputs::user_config`] now expects.
+fn user_at(entries: &[(&str, FileConfig)]) -> (PathBuf, UserConfig) {
+    (PathBuf::from(USER_CFG_PATH), user_cfg(entries))
+}
+
+/// The `Source::UserConfig` a winning user-config field produces in these
+/// tables (project `proj`, canonical path).
+fn user_source(project: &str) -> Source {
+    Source::UserConfig { project: project.into(), path: PathBuf::from(USER_CFG_PATH) }
+}
+
 // ---------------------------------------------------------------------------
 // resolve(): pure layering tables
 // ---------------------------------------------------------------------------
@@ -37,7 +51,7 @@ fn env_wins_over_everything() {
             file_cfg(Some("file-doc"), Some("wss://file.example"), Some("file-author")),
         )),
         project_marker: Some((PathBuf::from("/repo/.braid-project"), "proj".into())),
-        user_config: Some(user_cfg(&[(
+        user_config: Some(user_at(&[(
             "proj",
             file_cfg(Some("user-doc"), Some("wss://user.example"), Some("user-author")),
         )])),
@@ -48,7 +62,10 @@ fn env_wins_over_everything() {
     assert_eq!(got.doc_id.expose_secret(), "env-doc");
     assert_eq!(got.sync_server, "wss://env.example");
     assert_eq!(got.author, "env-author");
-    assert_eq!(got.doc_id_source, SecretSource::Env);
+    // each field reports the env var it came from
+    assert_eq!(got.doc_id_source, Source::Env("BRAID_DOC_ID".into()));
+    assert_eq!(got.sync_server_source, Source::Env("BRAID_SYNC_URL".into()));
+    assert_eq!(got.author_source, Source::Env("BRAID_AUTHOR".into()));
 }
 
 #[test]
@@ -59,7 +76,7 @@ fn repo_file_wins_over_user_config() {
             file_cfg(Some("file-doc"), None, None),
         )),
         project_marker: Some((PathBuf::from("/repo/.braid-project"), "proj".into())),
-        user_config: Some(user_cfg(&[(
+        user_config: Some(user_at(&[(
             "proj",
             file_cfg(Some("user-doc"), Some("wss://user.example"), Some("user-author")),
         )])),
@@ -69,26 +86,31 @@ fn repo_file_wins_over_user_config() {
     };
     let got = resolve(&inputs).unwrap();
     assert_eq!(got.doc_id.expose_secret(), "file-doc");
-    assert_eq!(got.doc_id_source, SecretSource::RepoFile("/repo/.braid.toml".into()));
-    // per-field independence: sync_server and author keep falling through
+    assert_eq!(got.doc_id_source, Source::RepoFile("/repo/.braid.toml".into()));
+    // per-field independence: sync_server and author keep falling through to
+    // the user config, and each reports that distinct source
     assert_eq!(got.sync_server, "wss://user.example");
     assert_eq!(got.author, "user-author");
+    assert_eq!(got.sync_server_source, user_source("proj"));
+    assert_eq!(got.author_source, user_source("proj"));
 }
 
 #[test]
 fn user_config_via_marker() {
     let inputs = ConfigInputs {
         project_marker: Some((PathBuf::from("/repo/.braid-project"), "proj".into())),
-        user_config: Some(user_cfg(&[("proj", file_cfg(Some("user-doc"), None, None))])),
+        user_config: Some(user_at(&[("proj", file_cfg(Some("user-doc"), None, None))])),
         git_user_name: Some("git-author".into()),
         os_user: Some("os-author".into()),
         ..Default::default()
     };
     let got = resolve(&inputs).unwrap();
     assert_eq!(got.doc_id.expose_secret(), "user-doc");
-    assert_eq!(got.doc_id_source, SecretSource::UserConfig { project: "proj".into() });
+    assert_eq!(got.doc_id_source, user_source("proj"));
     assert_eq!(got.sync_server, DEFAULT_SYNC_SERVER, "default server fallback");
+    assert_eq!(got.sync_server_source, Source::Default);
     assert_eq!(got.author, "git-author", "author falls through to git");
+    assert_eq!(got.author_source, Source::GitConfig);
 }
 
 #[test]
@@ -96,9 +118,13 @@ fn author_chain_falls_back_to_os_user_then_unknown() {
     let base = ConfigInputs { env_doc_id: Some("env-doc".into()), ..Default::default() };
 
     let inputs = ConfigInputs { os_user: Some("os-author".into()), ..base.clone() };
-    assert_eq!(resolve(&inputs).unwrap().author, "os-author");
+    let got = resolve(&inputs).unwrap();
+    assert_eq!(got.author, "os-author");
+    assert_eq!(got.author_source, Source::OsUser);
 
-    assert_eq!(resolve(&base).unwrap().author, "unknown");
+    let got = resolve(&base).unwrap();
+    assert_eq!(got.author, "unknown");
+    assert_eq!(got.author_source, Source::Default);
 }
 
 #[test]
@@ -120,7 +146,7 @@ fn no_doc_id_anywhere_is_a_helpful_error() {
 fn marker_naming_missing_project_is_an_error() {
     let inputs = ConfigInputs {
         project_marker: Some((PathBuf::from("/repo/.braid-project"), "ghost".into())),
-        user_config: Some(user_cfg(&[("proj", file_cfg(Some("user-doc"), None, None))])),
+        user_config: Some(user_at(&[("proj", file_cfg(Some("user-doc"), None, None))])),
         ..Default::default()
     };
     let err = resolve(&inputs).unwrap_err();
@@ -153,7 +179,27 @@ fn repo_file_without_doc_id_still_contributes_other_fields() {
     };
     let got = resolve(&inputs).unwrap();
     assert_eq!(got.doc_id.expose_secret(), "env-doc");
+    assert_eq!(got.doc_id_source, Source::Env("BRAID_DOC_ID".into()));
     assert_eq!(got.sync_server, "wss://file.example");
+    assert_eq!(got.sync_server_source, Source::RepoFile("/repo/.braid.toml".into()));
+}
+
+// ---------------------------------------------------------------------------
+// Source::describe(): human-readable provenance for `braid config`/`secret`
+// ---------------------------------------------------------------------------
+
+#[test]
+fn source_describe_names_each_origin() {
+    assert_eq!(Source::Env("BRAID_DOC_ID".into()).describe(), "BRAID_DOC_ID environment variable");
+    assert_eq!(Source::RepoFile("/repo/.braid.toml".into()).describe(), "/repo/.braid.toml");
+    assert_eq!(
+        Source::UserConfig { project: "q2".into(), path: PathBuf::from(USER_CFG_PATH) }.describe(),
+        format!("{USER_CFG_PATH} [projects.q2]"),
+    );
+    assert_eq!(Source::GitConfig.describe(), "git config user.name");
+    // OS-username and built-in-default descriptions are stable, human prose
+    assert!(Source::OsUser.describe().contains("USER"));
+    assert!(Source::Default.describe().contains("default"));
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +258,8 @@ fn gather_reads_user_config_via_xdg() {
 
     let env = env_map(&[("XDG_CONFIG_HOME", cfg_home.to_str().unwrap())]);
     let inputs = gather_fs(&cwd, &env).unwrap();
-    let uc = inputs.user_config.expect("user config should load");
+    let (path, uc) = inputs.user_config.expect("user config should load");
+    assert_eq!(path, cfg_home.join("braid/projects.toml"), "remembers the resolved path");
     assert_eq!(uc.projects["myproj"].doc_id.as_deref(), Some("from-user-config"));
 }
 
