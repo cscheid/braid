@@ -12,4 +12,5 @@ pub mod mcp;
 pub mod ops;
 pub mod skein;
 pub mod sync;
+pub mod ui;
 pub mod ws;
