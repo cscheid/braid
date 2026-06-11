@@ -11,20 +11,14 @@ interface Props {
   defaultOpen?: boolean;
 }
 
-export function StatusGroup({
-  status,
-  issues,
-  selectedId,
-  onSelect,
-  defaultOpen = true,
-}: Props) {
+export function StatusGroup({ status, issues, selectedId, onSelect, defaultOpen = true }: Props) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
     <div className={`status-group status-group--${status}`}>
       <button
         className="status-group__header"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(o => !o)}
         aria-expanded={open}
       >
         <span className="status-group__dot" />
@@ -34,7 +28,7 @@ export function StatusGroup({
       </button>
       {open && (
         <div className="status-group__cards">
-          {issues.map((issue) => (
+          {issues.map(issue => (
             <StrandCard
               key={issue.id}
               issue={issue}
