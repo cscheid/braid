@@ -28,8 +28,9 @@ config); warm-start/offline must be added at the **webview** level (IndexedDB).
 8. **Lean dependency** — extract `crates/braid-config`; the viewer depends on *that*, not the heavy `braid` crate.
 
 **Outcome:** `cargo xtask viewer-dev` opens a native window; add project folders,
-switch skeins, view/edit strands with warm starts. `cargo build --release -p
-braid-viewer` → a runnable executable per OS.
+switch skeins, view/edit strands with warm starts. `cargo xtask viewer-build`
+(`cargo tauri build`) → a runnable executable/bundle per OS. (A plain `cargo
+build --release -p braid-viewer` is only a compile smoke check — see Gotchas.)
 
 ## Architecture
 ```
@@ -262,13 +263,24 @@ default-build leakage ever bites.
   string; static `wss:` is the always-works fallback. Isolate per-project parse errors.
 - IndexedDB persistence under `tauri://` is unproven per-engine → pin `data_directory` + empirical gate.
 - Secret hygiene: `viewer.toml` = paths only; never log `docUrl`. Keep `useHttpsScheme` stable.
+- **`cargo build --release` ≠ a runnable app (Tauri v2).** The dev/prod switch is the `tauri`
+  crate's `dev = !custom-protocol` cfg; only the Tauri CLI sets `custom-protocol`. A plain
+  `cargo build` → dev-mode binary that loads `build.devUrl` (`http://localhost:5173`) →
+  `ERR_CONNECTION_REFUSED` with no dev server. Use `cargo xtask viewer-build`. Do **not** add a
+  `custom-protocol` feature manually (it's ignored/CLI-managed since v2.0.0-beta.5). `xtask
+  viewer-*` now preflight-checks for the CLI + `ui/node_modules` and prints the fix.
+- **Observability:** `tauri-plugin-log` (stdout + log-dir file + webview) is registered, with a
+  startup line logging each window's resolved URL — the release exe is otherwise silent
+  (`windows_subsystem = "windows"`, no console). `devtools` feature is on so the shipped exe is
+  inspectable. Never log `docUrl`; window URLs (localhost:5173 / tauri://) are not secrets.
 
 ## Verification (end-to-end)
 1. `cargo test -p braid-config -p braid` — `ui_config`, registry, viewer.toml hygiene; existing tests green.
 2. `cargo xtask ci` (now without `--workspace`, driven by `default-members`) + the musl job stay green.
 3. `cargo xtask viewer-dev` → add two project folders, switch, confirm each shows its own
    strands **and the previous socket closes** (only active syncs).
-4. **Build the executable** (`cargo build --release -p braid-viewer`) and run it — CSP is only
+4. **Build the runnable app** (`cargo xtask viewer-build` = `cargo tauri build`; **not** a bare
+   `cargo build --release`, which omits `custom-protocol` → dev-mode binary) and run it — CSP is only
    enforced here: WASM loads, `wss` syncs, an `allowed_sync_servers` entry takes effect. Quit &
    relaunch → **warm start from IndexedDB**; offline → reads work. Repeat per OS incl. **Ubuntu 22.04**.
 5. agent-browser drives `braid ui` in a browser to verify UI logic (rendering/filters/edits).

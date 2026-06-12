@@ -143,17 +143,62 @@ fn build_ui() -> i32 {
 // viewer-dev / viewer-build
 // ---------------------------------------------------------------------------
 
+/// Pure preflight for `viewer-dev`/`viewer-build`: given whether the
+/// prerequisites are present, return `Ok` when ready or a human-readable
+/// error spelling out the exact install command for each missing piece.
+///
+/// Kept side-effect-free so it can be unit-tested without a real toolchain;
+/// `viewer_tauri` does the actual probing and feeds the booleans in.
+fn viewer_preflight(has_tauri_cli: bool, has_node_modules: bool) -> Result<(), String> {
+    let mut problems: Vec<&str> = Vec::new();
+    if !has_tauri_cli {
+        problems.push(
+            "  - cargo-tauri CLI not found. Install it once:\n      \
+             cargo install tauri-cli --version '^2' --locked",
+        );
+    }
+    if !has_node_modules {
+        problems.push(
+            "  - ui/node_modules missing (the Vite frontend deps). Install them:\n      \
+             cd ui && npm install",
+        );
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "xtask: cannot run the viewer — prerequisites missing:\n{}",
+            problems.join("\n")
+        ))
+    }
+}
+
 /// Run `cargo tauri <subcommand>` inside `crates/braid-viewer/`.
 fn viewer_tauri(subcommand: &str) -> i32 {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-    let viewer_dir = PathBuf::from(&manifest).join("../../crates/braid-viewer");
-    let viewer_dir = match viewer_dir.canonicalize() {
+    let root = PathBuf::from(&manifest).join("../..");
+    let viewer_dir = match root.join("crates/braid-viewer").canonicalize() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("xtask: cannot find crates/braid-viewer: {e}");
             return 1;
         }
     };
+
+    // Preflight: fail fast with an actionable message rather than letting
+    // `cargo` emit a bare `no such command: tauri`, and before the Tauri CLI
+    // trips over a missing `ui/node_modules` mid-build.
+    let has_tauri_cli = Command::new("cargo")
+        .args(["tauri", "--version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let has_node_modules = root.join("ui/node_modules").is_dir();
+    if let Err(msg) = viewer_preflight(has_tauri_cli, has_node_modules) {
+        eprintln!("{msg}");
+        return 1;
+    }
+
     eprintln!("xtask: cargo tauri {subcommand} in {}", viewer_dir.display());
     match Command::new("cargo").args(["tauri", subcommand]).current_dir(&viewer_dir).status() {
         Ok(st) if st.success() => 0,
@@ -233,4 +278,41 @@ fn install_hooks() -> i32 {
     }
     println!("installed {}", hook.display());
     0
+}
+
+// ---------------------------------------------------------------------------
+// tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::viewer_preflight;
+
+    #[test]
+    fn preflight_ok_when_prerequisites_present() {
+        assert!(viewer_preflight(true, true).is_ok());
+    }
+
+    #[test]
+    fn preflight_flags_missing_tauri_cli_with_install_command() {
+        let err = viewer_preflight(false, true).unwrap_err();
+        assert!(err.contains("cargo install tauri-cli"), "must name the fix:\n{err}");
+        assert!(!err.contains("npm install"), "must not mention node when node is fine:\n{err}");
+    }
+
+    #[test]
+    fn preflight_flags_missing_node_modules_with_install_command() {
+        let err = viewer_preflight(true, false).unwrap_err();
+        assert!(err.contains("npm install"), "must name the fix:\n{err}");
+        assert!(!err.contains("tauri-cli"), "must not mention tauri when cli is present:\n{err}");
+    }
+
+    #[test]
+    fn preflight_reports_both_when_both_missing() {
+        let err = viewer_preflight(false, false).unwrap_err();
+        assert!(
+            err.contains("cargo install tauri-cli") && err.contains("npm install"),
+            "must list both fixes:\n{err}"
+        );
+    }
 }

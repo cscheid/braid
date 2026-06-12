@@ -228,9 +228,7 @@ function ViewerShell() {
                 title={folder}
               >
                 <span className="viewer-chooser__name">
-                  {folder.split("/").at(-1) ||
-                    folder.split("\\").at(-1) ||
-                    folder}
+                  {folder.split(/[/\\]/).filter(Boolean).pop() || folder}
                 </span>
                 <span className="viewer-chooser__path">{folder}</span>
               </button>

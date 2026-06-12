@@ -22,7 +22,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 braid-config = { workspace = true }
-tauri = { version = "2", features = [] }
+# `devtools` keeps the webview inspector available in release builds too, so
+# the shipped exe can be debugged (right-click → Inspect). Without it, devtools
+# compile in only under debug_assertions.
+tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -31,3 +34,5 @@ thiserror = { workspace = true }
 # under Rust ≥1.94 coherence (E0119). 0.3.47 satisfies serde_with's ~0.3.47
 # floor and predates the trait. Remove when tauri restricts those impls.
 time = "=0.3.47"
+tauri-plugin-log = "2"
+log = "0.4"
