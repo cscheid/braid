@@ -16,6 +16,7 @@ commands:
   ci [--dry-run]   run the full CI pipeline locally (fmt --check, clippy,
                    build, test); --dry-run prints the commands instead
   fmt              apply formatting (cargo fmt --all)
+  build-ui         build the React UI (npm ci + vite build) in ui/
   install-hooks    write a .git/hooks/pre-push that runs `cargo xtask ci`
                    (opt-in; skippable with `git push --no-verify`)";
 
@@ -34,6 +35,7 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("ci") => ci(&args[1..]),
         Some("fmt") => run_steps(&[&["cargo", "fmt", "--all"]]),
+        Some("build-ui") => build_ui(),
         Some("install-hooks") => install_hooks(),
         Some(other) => {
             eprintln!("xtask: unknown command {other:?}\n{USAGE}");
@@ -85,10 +87,52 @@ fn run_steps(steps: &[&[&str]]) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// install-hooks
+// build-ui
 // ---------------------------------------------------------------------------
 
-/// Ownership marker: a pre-push containing this line is ours to rewrite;
+/// Build the React UI in `ui/` using npm.
+///
+/// The built output (`ui/dist/`) is committed to the repository so that
+/// `cargo build` works without Node.js — only run this when UI source changes.
+fn build_ui() -> i32 {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+    let ui_dir = PathBuf::from(&manifest).join("../../ui");
+    let ui_dir = match ui_dir.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("xtask: cannot find ui/ directory: {e}");
+            return 1;
+        }
+    };
+
+    eprintln!("xtask: building UI in {}", ui_dir.display());
+
+    let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
+
+    for step_args in [&["ci"][..], &["run", "build"][..]] {
+        let pretty = format!("npm {}", step_args.join(" "));
+        eprintln!("xtask: {pretty}");
+        match Command::new(npm).args(step_args).current_dir(&ui_dir).status() {
+            Ok(st) if st.success() => {}
+            Ok(st) => {
+                eprintln!("xtask: FAILED ({st}): {pretty}");
+                return 1;
+            }
+            Err(e) => {
+                eprintln!("xtask: cannot run {pretty}: {e}");
+                eprintln!("xtask: is Node.js / npm installed?");
+                return 1;
+            }
+        }
+    }
+
+    eprintln!("xtask: UI built — commit ui/dist/ if the output changed");
+    0
+}
+
+// ---------------------------------------------------------------------------
+// install-hooks
+// ---------------------------------------------------------------------------
 /// anything else is refused.
 const HOOK_MARKER: &str = "installed by `cargo xtask install-hooks`";
 

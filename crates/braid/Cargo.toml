@@ -17,7 +17,7 @@ automerge = { workspace = true }
 # breaking static musl release builds. src/ws.rs provides the websocket
 # dialer instead, over rustls (br-f3b18xoa).
 samod = { workspace = true, features = ["tokio"] }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
 futures = { workspace = true }
 # "connect" + rustls for the dialer (src/ws.rs); "handshake" also covers
 # the accept side of the tests' in-process ws server. webpki roots are
@@ -39,6 +39,8 @@ thiserror = { workspace = true }
 sha2 = "0.10"
 toml = "0.8"
 rmcp = { version = "1.7.0", default-features = false, features = ["server", "transport-io"] }
+axum = { workspace = true }
+rust-embed = { workspace = true, features = ["mime-guess"] }
 
 [dev-dependencies]
 chrono = { workspace = true }

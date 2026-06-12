@@ -95,6 +95,7 @@ braid create "Fix the frobnicator" \
 | `braid import <file>` | import strands from JSONL (beads or braid format); beads tombstones (soft-deleted records) are recognized and skipped, reported as `(skipped N tombstones)` |
 | `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |
+| `braid ui` | open the skein in a local web UI; starts a minimal HTTP server on a random loopback port, serves the embedded React app, and opens the browser. The browser connects directly to the sync server — the local server only delivers the config. Press Ctrl-C to stop |
 
 Conventions:
 

@@ -237,6 +237,8 @@ enum Cmd {
         #[arg(long, conflicts_with = "read_only")]
         enable_destructive: bool,
     },
+    /// Open the skein in a local web UI (browser connects directly to the sync server)
+    Ui,
 }
 
 #[derive(Subcommand)]
@@ -400,6 +402,7 @@ async fn main() {
         Cmd::Mcp { project, read_only, enable_destructive } => {
             braid::mcp::serve(braid::mcp::McpOpts { project, read_only, enable_destructive }).await
         }
+        Cmd::Ui => braid::ui::serve(&cwd).await,
     };
 
     if let Err(e) = result {
