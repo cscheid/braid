@@ -1,0 +1,33 @@
+[package]
+name = "braid-viewer"
+description = "braid-viewer: a Tauri desktop app for braid skeins"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+repository.workspace = true
+
+# braid-viewer must stay out of default-members (Tauri can't build on musl);
+# it is built explicitly with `-p braid-viewer` or via `cargo xtask viewer-*`.
+
+[lib]
+name = "braid_viewer_lib"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "braid-viewer"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+braid-config = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# time 0.3.48 added ModifierValue, which breaks tauri's blanket From impls
+# under Rust ≥1.94 coherence (E0119). 0.3.47 satisfies serde_with's ~0.3.47
+# floor and predates the trait. Remove when tauri restricts those impls.
+time = "=0.3.47"
