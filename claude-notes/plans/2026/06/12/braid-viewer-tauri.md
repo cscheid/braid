@@ -102,12 +102,82 @@ default-build leakage ever bites.
 ### Phase 2 — braid-viewer Rust backend (thin)
 - [x] Commands in `src/lib.rs` (`mod commands` submodule to avoid E0255): `list_projects_cmd`,
       `add_project_cmd`, `remove_project_cmd`, `get_config_cmd`. Never logs `UiConfig`/`docUrl`.
-- [ ] **CSP runtime injection**: `_extra_servers` is computed at startup but not yet injected
-      into the webview CSP via `on_web_resource_request`. For v1 the static `wss:` fallback
-      in `tauri.conf.json` covers the default server; inject dynamically when multi-server matters.
+- [ ] **CSP runtime injection** *(gate: only needed if a project uses a non-default sync server)*
+
+  **Status:** `_extra_servers` is computed in `run()` but dropped (`_` prefix). The static CSP
+  in `tauri.conf.json` only allows `wss://sync.automerge.org`; any other server is silently
+  blocked by the webview.
+
+  **Implementation** (`crates/braid-viewer/src/lib.rs`):
+
+  In Tauri v2, CSP is per-webview and must be set on `WebviewWindowBuilder` via
+  `on_web_resource_request`, which intercepts every `tauri://` navigation/resource request
+  and can add/replace response headers. The flow:
+
+  1. Compute `extra_servers: Vec<String>` at startup (already done — remove the `_` prefix).
+  2. Build the CSP string dynamically:
+     ```rust
+     let extra = extra_servers.iter()
+         .map(|s| s.as_str())
+         .collect::<Vec<_>>()
+         .join(" ");
+     let csp = format!(
+         "default-src 'self'; \
+          script-src 'self' 'wasm-unsafe-eval'; \
+          connect-src 'self' ipc: http://ipc.localhost wss://sync.automerge.org {extra}; \
+          img-src 'self' data: asset: https://asset.localhost"
+     );
+     ```
+  3. Remove the static `csp` field from `tauri.conf.json` `app.security` (or set it to the
+     default-only string as a fallback for the bundle check).
+  4. Wire into the builder — note: in Tauri v2 `on_web_resource_request` is on
+     `WebviewWindowBuilder`, not on `Builder`. The setup closure receives the `AppHandle`;
+     use `app.get_webview_window("main")` **after** the window is created, or build the window
+     manually with `WebviewWindowBuilder::new(app, "main", WebviewUrl::App("/".into()))` in
+     the setup hook and call `.on_web_resource_request(move |_req, resp| { resp.headers_mut().insert("Content-Security-Policy", csp.parse().unwrap()); })`.
+  5. The static `csp` in `tauri.conf.json` is only enforced in the **built** binary, not
+     in `tauri dev`. Always verify with `cargo build --release -p braid-viewer`.
+
 - [x] Dialog plugin registered; `ConfigDir` state managed; commands wired into `invoke_handler!`.
-- [ ] `WebviewWindowBuilder::data_directory(…)` not yet set — IndexedDB will use the default
-      location. Set explicitly for deterministic persistence (needed before offline/warm-start works).
+- [ ] **`data_directory`** *(gate: only needed if IndexedDB doesn't persist at the WebView default location)*
+
+  **Status:** not set — each engine uses its own default:
+  - **Windows/WebView2:** `%AppData%\org.cscheid.braidviewer\EBWebView\Default`
+  - **macOS/WKWebView:** `~/Library/WebKit/org.cscheid.braidviewer`
+  - **Linux/WebKitGTK:** `~/.local/share/org.cscheid.braidviewer`
+
+  These are stable across restarts so warm starts *should* work. Set explicitly only if
+  empirical testing shows the default location doesn't persist or is inconvenient to inspect.
+
+  **Implementation** (`crates/braid-viewer/src/lib.rs`):
+
+  Resolve a data dir alongside the config dir in the `setup` closure, then pass it to
+  `WebviewWindowBuilder`. Since Tauri v2 doesn't expose `data_directory` on the global
+  `Builder`, the window must be created manually in setup instead of via `tauri.conf.json`:
+
+  ```rust
+  .setup(|app| {
+      let config_dir = app.path().app_config_dir()
+          .unwrap_or_else(|_| PathBuf::from(".config/braid-viewer"));
+      // Use app_local_data_dir so it matches the OS convention for app storage.
+      let data_dir = app.path().app_local_data_dir()
+          .unwrap_or_else(|_| config_dir.join("data"));
+      app.manage(ConfigDir(config_dir.clone()));
+
+      // Build the window manually so we can set data_directory.
+      tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("/".into()))
+          .title("braid viewer")
+          .inner_size(1200.0, 800.0)
+          .min_inner_size(800.0, 600.0)
+          .data_directory(data_dir)
+          .build()?;
+      Ok(())
+  })
+  ```
+
+  Remove the `windows` array from `tauri.conf.json` once the window is created in code
+  (keep `productName`, `identifier`, `build`, `bundle`). The `data_directory` call pins
+  IndexedDB to a known, inspectable path — useful for debugging warm-start failures.
 
 ### Phase 3 — Tauri scaffold
 - [x] `Cargo.toml` (tauri, tauri-build, tauri-plugin-dialog, braid-config, serde, time pinned to
