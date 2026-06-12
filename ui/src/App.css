@@ -959,6 +959,41 @@ input, textarea, select { font: inherit; color: inherit; }
   scrollbar-color: rgba(255,255,255,.1) transparent;
 }
 
+.viewer-chooser__row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+}
+
+.viewer-chooser__row .viewer-chooser__item {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.viewer-chooser__remove {
+  flex: 0 0 auto;
+  width: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.viewer-chooser__remove:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-bright);
+  color: var(--text);
+}
+
 .viewer-chooser__item {
   display: flex;
   flex-direction: column;
