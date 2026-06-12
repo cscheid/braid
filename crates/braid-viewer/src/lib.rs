@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use braid_config::ui_config::{ui_config, UiConfig};
 use braid_config::viewer::{allowed_sync_servers, list_projects};
 use tauri::Manager;
+use tauri_plugin_log::{Target, TargetKind};
 
 /// The XDG config dir for the viewer registry, injected at setup time.
 pub struct ConfigDir(pub PathBuf);
@@ -109,8 +110,42 @@ pub mod commands {
 /// `allowed_sync_servers` list in viewer.toml, then starts Tauri.
 pub fn run() {
     tauri::Builder::default()
+        // Logging first so the rest of setup (and any plugin) can emit records.
+        // Writes to stdout, a rotating file in the platform log dir
+        // (`braid-viewer.log` under e.g. %APPDATA%/<id>/logs on Windows,
+        // ~/.local/share/<id>/logs on Linux, ~/Library/Logs/<id> on macOS), and
+        // forwards to the webview console. This is what gives the *release* exe
+        // a trace at all: it runs with `windows_subsystem = "windows"` (no
+        // console) and would otherwise fail completely silently.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::LogDir { file_name: None }),
+                    Target::new(TargetKind::Webview),
+                ])
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            log::info!("braid-viewer v{} starting", env!("CARGO_PKG_VERSION"));
+
+            // Diagnostic: log each window's resolved URL. A binary built via the
+            // Tauri CLI (`cargo tauri build`/`xtask viewer-build`) embeds the
+            // frontend and shows a `tauri://localhost` / `http://tauri.localhost`
+            // URL. A binary built with a plain `cargo build --release` omits the
+            // `custom-protocol` feature, runs in dev mode, and shows the Vite dev
+            // URL (`http://localhost:5173`) — which fails with
+            // ERR_CONNECTION_REFUSED when no dev server is running. These URLs are
+            // not secrets (unlike docUrl, which must never be logged).
+            for (label, win) in app.webview_windows() {
+                match win.url() {
+                    Ok(url) => log::info!("window '{label}' loading {url}"),
+                    Err(e) => log::warn!("window '{label}' url unavailable: {e}"),
+                }
+            }
+
             let config_dir = app
                 .path()
                 .app_config_dir()

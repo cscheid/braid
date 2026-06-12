@@ -11,17 +11,40 @@ server required.
 # Development (hot-reload; requires tauri-cli and Node.js)
 cargo xtask viewer-dev
 
-# Release executable (Tauri bundle — .app/.exe/.AppImage)
+# Release app (Tauri bundle — .app/.exe/.AppImage). The only command that
+# produces a *runnable* standalone app.
 cargo xtask viewer-build
-
-# Or: bare executable smoke build (no bundle; fastest; what CI does)
-cargo build --release -p braid-viewer
 ```
 
 Install `tauri-cli` once:
 ```sh
-cargo install tauri-cli --version '^2'
+cargo install tauri-cli --version '^2' --locked
 ```
+
+> **Do not** run `cargo build --release -p braid-viewer` to launch the app.
+> In Tauri v2 a runnable binary requires the `custom-protocol` feature, which
+> only the Tauri CLI (`cargo tauri build`/`cargo xtask viewer-build`) sets. A
+> plain `cargo build` omits it, so the binary starts in **dev mode** and tries
+> to load the Vite dev server (`http://localhost:5173`); with no dev server
+> running you get a blank `ERR_CONNECTION_REFUSED` window. `cargo build -p
+> braid-viewer` is therefore only a **compile smoke check** (what `viewer.yml`
+> CI runs) — not a way to produce a usable app.
+
+### Logs
+
+The app logs to stdout and to a rotating `braid-viewer.log` in the platform log
+directory:
+
+- **Linux:** `~/.local/share/org.cscheid.braidviewer/logs/`
+- **macOS:** `~/Library/Logs/org.cscheid.braidviewer/`
+- **Windows:** `%APPDATA%\org.cscheid.braidviewer\logs\`
+
+A startup line records each window's resolved URL — if it shows
+`http://localhost:5173` you built a dev binary (see the warning above). Because
+the release exe runs with no console on Windows, this file is the primary way to
+debug a launch failure. Logs are also forwarded to the webview console
+(right-click → **Inspect**; available in release because the `devtools` feature
+is enabled).
 
 ## Per-OS prerequisites
 

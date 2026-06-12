@@ -208,11 +208,14 @@ your sync server — no CLI or local server required.
 ```sh
 cargo xtask viewer-dev    # hot-reload dev (needs tauri-cli + Node.js)
 cargo xtask viewer-build  # production bundle (.app / .exe / .AppImage)
-cargo build --release -p braid-viewer  # bare executable for quick testing
 ```
 
-Per-OS prerequisites, offline/warm-start via IndexedDB, and CSP
-configuration: [docs/viewer.md](docs/viewer.md).
+`cargo xtask viewer-build` is the only command that produces a runnable
+app — a plain `cargo build --release -p braid-viewer` omits Tauri's
+`custom-protocol` feature and starts in dev mode (blank
+`ERR_CONNECTION_REFUSED` window). Per-OS prerequisites, logs/debugging,
+offline/warm-start via IndexedDB, and CSP configuration:
+[docs/viewer.md](docs/viewer.md).
 
 ## MCP server
 
