@@ -41,18 +41,14 @@ fn run_npm(npm: &str, args: &[&str], cwd: &Path) {
     let pretty = format!("npm {}", args.join(" "));
     eprintln!("cargo:warning=braid build.rs: {pretty}");
 
-    let status = Command::new(npm)
-        .args(args)
-        .current_dir(cwd)
-        .status()
-        .unwrap_or_else(|e| {
-            panic!(
-                "\n\nbraid build.rs: failed to run `{pretty}`: {e}\n\
+    let status = Command::new(npm).args(args).current_dir(cwd).status().unwrap_or_else(|e| {
+        panic!(
+            "\n\nbraid build.rs: failed to run `{pretty}`: {e}\n\
                  Is Node.js / npm installed? If you want to build braid \
                  without Node.js, set SKIP_UI_BUILD=1 (the `braid ui` \
                  command will show a stub page).\n"
-            )
-        });
+        )
+    });
 
     assert!(
         status.success(),
