@@ -2,7 +2,7 @@
 
 This **single** React app serves two front ends from one bundle:
 
-- **Web** — `braid ui` (axum) serves the embedded build; config via
+- **Web** — `braid ui` serves the embedded build; config via
   `fetch("/api/config")`; ephemeral repo (no local storage).
 - **Desktop** — `braid-viewer` (Tauri) loads the same bundle; config via Tauri
   `invoke(...)`; IndexedDB-backed repo; multi-project.
@@ -16,8 +16,8 @@ viewer shell). Never put Tauri `invoke` calls on the web path.
 
 - `ui/dist` is **gitignored**. `braid`'s `build.rs` runs `npm ci && npm run
   build` and rust-embed embeds the output into the `braid` binary (the Tauri
-  build embeds it too). Run `cargo xtask build-ui` after changing UI source if
-  you need a fresh `dist` standalone.
+  build embeds it too). Run `cargo xtask build-ui` after UI changes for a fresh
+  `dist`.
 - `tsconfig.app.json` targets **ES2020** — newer runtime APIs
   (`Array.prototype.at`, etc.) fail `tsc -b`. Use ES2020-safe idioms or bump the
   target deliberately.
