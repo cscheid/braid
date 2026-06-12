@@ -81,6 +81,17 @@ Build with `x86_64-pc-windows-msvc`.
 The viewer remembers the last-opened project across restarts. Project paths
 are stored in `~/.config/braid/viewer.toml` — **paths only, never secrets**.
 
+## Switching / removing projects
+
+- **Switch:** click **⇄ Projects** in the header to return to the chooser,
+  then pick another registered project (or add one). Switching shuts down the
+  previous skein's sync connection before opening the next, so only the active
+  project syncs.
+- **Remove:** in the chooser, click the **×** next to a project to drop it from
+  the list (`viewer.toml`). This only forgets the path — it never touches the
+  folder or its `.braid.toml`. Removing the project you're currently in returns
+  you to the chooser.
+
 ## Offline / warm start
 
 The viewer uses IndexedDB (via `@automerge/automerge-repo-storage-indexeddb`)

@@ -195,6 +195,23 @@ function ViewerShell() {
     setActiveFolder(folder);
   };
 
+  const removeProject = async (folder: string) => {
+    setAddError(null);
+    try {
+      await invoke("remove_project_cmd", { folder });
+      const updated = await invoke<string[]>("list_projects_cmd");
+      setProjects(updated);
+      // Forget it as the remembered project, and bail to the chooser if it
+      // was the one currently open.
+      if (localStorage.getItem(LAST_PROJECT_KEY) === folder) {
+        localStorage.removeItem(LAST_PROJECT_KEY);
+      }
+      if (activeFolder === folder) setActiveFolder(null);
+    } catch (err) {
+      setAddError(String(err));
+    }
+  };
+
   const handleAddProject = async () => {
     setAddError(null);
     try {
@@ -221,17 +238,26 @@ function ViewerShell() {
         ) : (
           <div className="viewer-chooser">
             {projects.map((folder) => (
-              <button
-                key={folder}
-                className="viewer-chooser__item"
-                onClick={() => selectProject(folder)}
-                title={folder}
-              >
-                <span className="viewer-chooser__name">
-                  {folder.split(/[/\\]/).filter(Boolean).pop() || folder}
-                </span>
-                <span className="viewer-chooser__path">{folder}</span>
-              </button>
+              <div key={folder} className="viewer-chooser__row">
+                <button
+                  className="viewer-chooser__item"
+                  onClick={() => selectProject(folder)}
+                  title={folder}
+                >
+                  <span className="viewer-chooser__name">
+                    {folder.split(/[/\\]/).filter(Boolean).pop() || folder}
+                  </span>
+                  <span className="viewer-chooser__path">{folder}</span>
+                </button>
+                <button
+                  className="viewer-chooser__remove"
+                  onClick={() => removeProject(folder)}
+                  title="Remove from list"
+                  aria-label={`Remove project ${folder}`}
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -261,7 +287,11 @@ function ViewerShell() {
   if (state.phase === "ready" && repoRef.current) {
     return (
       <RepoContext.Provider value={repoRef.current}>
-        <ConnectedApp docUrl={state.docUrl} syncServer={state.syncServer} />
+        <ConnectedApp
+          docUrl={state.docUrl}
+          syncServer={state.syncServer}
+          onSwitchProject={() => setActiveFolder(null)}
+        />
       </RepoContext.Provider>
     );
   }
