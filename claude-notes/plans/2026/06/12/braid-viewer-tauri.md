@@ -81,6 +81,8 @@ default-build leakage ever bites.
       **macOS** Xcode CLT; **Windows** MSVC + `x86_64-pc-windows-msvc` + WebView2 runtime.
 - [x] `cargo install tauri-cli --version "^2"`. Pin the four `tauri*`/`@tauri-apps/*`
       packages exact (bump together). Create+commit `app-icon.png` (≥1024) → `cargo tauri icon`.
+      **Fix (this session):** stub icons (PNG renamed to .ico) replaced with proper multi-size
+      ICO (16/32/48/64/128/256 px, correct ICONDIR header) — Windows RC.EXE RC2175 error resolved.
 - [ ] Install **agent-browser** (`npm i -g agent-browser && agent-browser install --with-deps`).
       Confirm network policy allows tauri crates + `@tauri-apps/*` npm + Chromium.
 
@@ -140,9 +142,10 @@ default-build leakage ever bites.
       is missing.
 
 ### Phase 6 — CI (lean)
-- [x] New `viewer` job: matrix ubuntu-latest/ubuntu-22.04/macos-latest/windows-latest;
-      Linux installs WebKitGTK 4.1 deps; `cargo build -p braid-viewer` smoke. Existing jobs
-      use `default-members` (no `--workspace`) → stay green, musl unaffected.
+- [x] Viewer job moved to **separate path-filtered workflow** (`.github/workflows/viewer.yml`):
+      triggers only on changes to `crates/braid-viewer/`, `crates/braid-config/`, `Cargo.toml`,
+      `Cargo.lock`; matrix ubuntu-latest/ubuntu-22.04/macos-latest/windows-latest; Linux installs
+      WebKitGTK 4.1 deps; `cargo build -p braid-viewer` smoke. `ci.yml` untouched by viewer changes.
 - [ ] **Defer** producing/attaching `.dmg/.msi/.AppImage` until the app runs on all 3 webviews.
 
 ### Phase 7 — Docs
