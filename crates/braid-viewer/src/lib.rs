@@ -131,6 +131,27 @@ pub fn run() {
         .setup(|app| {
             log::info!("braid-viewer v{} starting", env!("CARGO_PKG_VERSION"));
 
+            let config_dir = app
+                .path()
+                .app_config_dir()
+                .unwrap_or_else(|_| PathBuf::from(".config/braid-viewer"));
+            // Pin the webview data directory so IndexedDB — and therefore
+            // offline reads / warm starts — persist deterministically across
+            // restarts. Tauri v2 exposes `data_directory` only on the
+            // per-window builder, so the main window is created here instead of
+            // declared in tauri.conf.json.
+            let data_dir =
+                app.path().app_local_data_dir().unwrap_or_else(|_| config_dir.join("data"));
+            app.manage(ConfigDir(config_dir.clone()));
+
+            tauri::WebviewWindowBuilder::new(app.handle(), "main", tauri::WebviewUrl::default())
+                .title("braid viewer")
+                .inner_size(1200.0, 800.0)
+                .min_inner_size(800.0, 600.0)
+                .data_directory(data_dir.clone())
+                .build()?;
+            log::info!("webview data dir: {}", data_dir.display());
+
             // Diagnostic: log each window's resolved URL. A binary built via the
             // Tauri CLI (`cargo tauri build`/`xtask viewer-build`) embeds the
             // frontend and shows a `tauri://localhost` / `http://tauri.localhost`
@@ -146,14 +167,10 @@ pub fn run() {
                 }
             }
 
-            let config_dir = app
-                .path()
-                .app_config_dir()
-                .unwrap_or_else(|_| PathBuf::from(".config/braid-viewer"));
-            app.manage(ConfigDir(config_dir.clone()));
-
-            // Pre-resolve sync servers for the CSP allowlist (best-effort;
-            // a bad .braid.toml must not crash startup).
+            // Pre-resolve sync servers for a future CSP allowlist (best-effort;
+            // a bad .braid.toml must not crash startup). Unused until runtime CSP
+            // injection lands — the static CSP covers the default server, the
+            // only one currently in use.
             let _extra_servers: Vec<String> = list_projects(&config_dir)
                 .unwrap_or_default()
                 .iter()
