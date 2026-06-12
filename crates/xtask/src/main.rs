@@ -17,17 +17,24 @@ commands:
                    build, test); --dry-run prints the commands instead
   fmt              apply formatting (cargo fmt --all)
   build-ui         build the React UI (npm ci + vite build) in ui/
+  viewer-dev       run braid-viewer in Tauri dev mode (`cargo tauri dev`)
+                   requires `cargo install tauri-cli --version '^2'`
+  viewer-build     build the braid-viewer Tauri app bundle (`cargo tauri build`)
   install-hooks    write a .git/hooks/pre-push that runs `cargo xtask ci`
                    (opt-in; skippable with `git push --no-verify`)";
 
 /// The pipeline `ci` runs, cheapest first; build-before-test avoids
 /// relinking the braid binary under assert_cmd e2e tests (same reason as
 /// ci.yml — see strand br-cache-flake).
+///
+/// No `--workspace` flag: Cargo uses `default-members`, which excludes
+/// `braid-viewer` (Tauri can't build on musl). Build it explicitly via
+/// `cargo xtask viewer-build` or `-p braid-viewer`.
 const CI_STEPS: &[&[&str]] = &[
     &["cargo", "fmt", "--all", "--check"],
-    &["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
-    &["cargo", "build", "--workspace", "--all-targets"],
-    &["cargo", "test", "--workspace"],
+    &["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
+    &["cargo", "build", "--all-targets"],
+    &["cargo", "test"],
 ];
 
 fn main() {
@@ -36,6 +43,8 @@ fn main() {
         Some("ci") => ci(&args[1..]),
         Some("fmt") => run_steps(&[&["cargo", "fmt", "--all"]]),
         Some("build-ui") => build_ui(),
+        Some("viewer-dev") => viewer_tauri("dev"),
+        Some("viewer-build") => viewer_tauri("build"),
         Some("install-hooks") => install_hooks(),
         Some(other) => {
             eprintln!("xtask: unknown command {other:?}\n{USAGE}");
@@ -128,6 +137,39 @@ fn build_ui() -> i32 {
 
     eprintln!("xtask: UI built — commit ui/dist/ if the output changed");
     0
+}
+
+// ---------------------------------------------------------------------------
+// viewer-dev / viewer-build
+// ---------------------------------------------------------------------------
+
+/// Run `cargo tauri <subcommand>` inside `crates/braid-viewer/`.
+fn viewer_tauri(subcommand: &str) -> i32 {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+    let viewer_dir = PathBuf::from(&manifest).join("../../crates/braid-viewer");
+    let viewer_dir = match viewer_dir.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("xtask: cannot find crates/braid-viewer: {e}");
+            return 1;
+        }
+    };
+    eprintln!("xtask: cargo tauri {subcommand} in {}", viewer_dir.display());
+    match Command::new("cargo").args(["tauri", subcommand]).current_dir(&viewer_dir).status() {
+        Ok(st) if st.success() => 0,
+        Ok(st) => {
+            eprintln!("xtask: FAILED ({st}): cargo tauri {subcommand}");
+            1
+        }
+        Err(e) => {
+            eprintln!("xtask: cannot run cargo tauri {subcommand}: {e}");
+            eprintln!(
+                "xtask: is tauri-cli installed? \
+                 (cargo install tauri-cli --version '^2')"
+            );
+            1
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -108,3 +108,98 @@ pub fn remove_project(folder: &Path, config_dir: &Path) -> Result<(), ViewerErro
 pub fn allowed_sync_servers(config_dir: &Path) -> Result<Vec<String>, ViewerError> {
     Ok(load_registry(config_dir)?.allowed_sync_servers)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::config::REPO_FILE_NAME;
+
+    fn make_project(dir: &Path, doc_id: &str) {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join(REPO_FILE_NAME), format!("doc_id = \"{doc_id}\"\n")).unwrap();
+    }
+
+    #[test]
+    fn add_list_remove_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path();
+        let project = tmp.path().join("proj");
+        make_project(&project, "testdocid123");
+
+        assert!(list_projects(config_dir).unwrap().is_empty());
+
+        add_project(&project, config_dir).unwrap();
+        assert_eq!(list_projects(config_dir).unwrap(), vec![project.clone()]);
+
+        remove_project(&project, config_dir).unwrap();
+        assert!(list_projects(config_dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn add_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        make_project(&project, "testdocid123");
+
+        add_project(&project, tmp.path()).unwrap();
+        add_project(&project, tmp.path()).unwrap();
+        assert_eq!(list_projects(tmp.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn remove_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        make_project(&project, "testdocid123");
+
+        add_project(&project, tmp.path()).unwrap();
+        remove_project(&project, tmp.path()).unwrap();
+        remove_project(&project, tmp.path()).unwrap();
+        assert!(list_projects(tmp.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn add_rejects_missing_braid_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("no-toml");
+        fs::create_dir_all(&project).unwrap();
+
+        let err = add_project(&project, tmp.path()).unwrap_err();
+        assert!(matches!(err, ViewerError::NoBraidToml { .. }));
+    }
+
+    #[test]
+    fn add_rejects_missing_doc_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("no-docid");
+        fs::create_dir_all(&project).unwrap();
+        fs::write(project.join(REPO_FILE_NAME), "author = \"alice\"\n").unwrap();
+
+        let err = add_project(&project, tmp.path()).unwrap_err();
+        assert!(matches!(err, ViewerError::MissingDocId { .. }));
+    }
+
+    #[test]
+    fn viewer_toml_contains_no_secrets() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let secret_id = "supersecret-doc-id-abc123";
+        make_project(&project, secret_id);
+
+        add_project(&project, tmp.path()).unwrap();
+
+        let content = fs::read_to_string(viewer_toml_path(tmp.path())).unwrap();
+        assert!(!content.contains("doc_id"), "viewer.toml must not contain 'doc_id': {content}");
+        assert!(!content.contains("docUrl"), "viewer.toml must not contain 'docUrl': {content}");
+        assert!(
+            !content.contains(secret_id),
+            "viewer.toml must not contain the doc id value: {content}"
+        );
+        assert!(
+            !content.contains("automerge:"),
+            "viewer.toml must not contain 'automerge:' URLs: {content}"
+        );
+    }
+}

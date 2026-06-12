@@ -36,15 +36,16 @@ jobs:
             sudo apt-get update && sudo apt-get install -y minisign
           fi
       # This job is mirrored locally by `cargo xtask ci` (crates/xtask) —
-      # keep the two in sync.
+      # keep the two in sync. No --workspace: Cargo uses default-members,
+      # which excludes braid-viewer (built explicitly in the viewer job).
       - run: cargo fmt --all --check
       # Build everything first so `cargo test` never relinks the braid
       # binary while assert_cmd e2e tests are spawning it (see strand
       # br-cache-flake for the class of race this avoids). Tests need no
       # network: sync e2e tests run an in-process server on TCP loopback.
-      - run: cargo build --workspace --all-targets
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo build --all-targets
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
 
   # Windows (x86_64-pc-windows-msvc) build + test. minisign is not needed:
   # the install.sh tests are cfg(unix) (they run bash and shell shims), so
@@ -63,9 +64,10 @@ jobs:
         with:
           key: windows
       # Build-first for the same assert_cmd relink-race reason as the unix job.
-      - run: cargo build --workspace --all-targets
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # No --workspace: default-members excludes braid-viewer.
+      - run: cargo build --all-targets
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
       # Exercise install.ps1 end to end without a published release: zip the
       # just-built braid.exe, then install it from that local artifact with
       # checksum verification. Mirrors how tests/bootstrap_sh.rs proves
@@ -110,5 +112,32 @@ jobs:
         with:
           key: musl
       # Build-first for the same assert_cmd relink-race reason as above.
-      - run: cargo build --workspace --all-targets --target x86_64-unknown-linux-musl
-      - run: cargo test --workspace --target x86_64-unknown-linux-musl
+      # No --workspace: default-members excludes braid-viewer (can't build on musl).
+      - run: cargo build --all-targets --target x86_64-unknown-linux-musl
+      - run: cargo test --target x86_64-unknown-linux-musl
+
+  # Smoke-build braid-viewer across all supported OS + ubuntu-22.04 (LTS
+  # WebKitGTK floor). No --workspace in the other jobs keeps this one the
+  # single place that builds the Tauri crate in CI.
+  viewer:
+    name: viewer build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: viewer-${{ matrix.os }}
+      - name: Install Linux WebKit dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev \
+            libsoup-3.0-dev build-essential
+      - run: cargo build -p braid-viewer
