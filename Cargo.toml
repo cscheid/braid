@@ -1,5 +1,14 @@
 [workspace]
-members = ["crates/braid-core", "crates/braid", "crates/xtask"]
+members = [
+    "crates/braid-core",
+    "crates/braid-config",
+    "crates/braid",
+    "crates/xtask",
+    "crates/braid-viewer",
+]
+# braid-viewer excluded from default-members: Tauri can't build on musl.
+# Build it explicitly with `-p braid-viewer` or `cargo xtask viewer-*`.
+default-members = ["crates/braid-core", "crates/braid-config", "crates/braid", "crates/xtask"]
 resolver = "2"
 
 [workspace.package]
@@ -20,6 +29,7 @@ opt-level = 3
 strip = true
 
 [workspace.dependencies]
+braid-config = { path = "crates/braid-config" }
 automerge = "0.9.0"
 samod = "0.10.0"
 axum = "0.8"
@@ -38,3 +48,5 @@ tokio-tungstenite = { version = "0.27", default-features = false }
 # default-features off to drop aws-lc-rs; ring is enabled instead (see
 # crates/braid/Cargo.toml for rationale).
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+
+

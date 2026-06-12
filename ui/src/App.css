@@ -947,6 +947,94 @@ input, textarea, select { font: inherit; color: inherit; }
   word-break: break-all;
 }
 
+/* ─── Viewer project chooser ─────────────────────────────────────────────── */
+.viewer-chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(440px, 90vw);
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.1) transparent;
+}
+
+.viewer-chooser__row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+}
+
+.viewer-chooser__row .viewer-chooser__item {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.viewer-chooser__remove {
+  flex: 0 0 auto;
+  width: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.viewer-chooser__remove:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-bright);
+  color: var(--text);
+}
+
+.viewer-chooser__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.viewer-chooser__item:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-bright);
+}
+
+.viewer-chooser__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.viewer-chooser__path {
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 /* ─── New strand dialog ──────────────────────────────────────────────────── */
 .dialog-overlay {
   position: fixed;

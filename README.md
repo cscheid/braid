@@ -201,6 +201,24 @@ Honest limits: rotation protects *future* reads and writes. The old
 document's history remains readable forever to anyone holding the old id;
 revocation cannot un-leak the past.
 
+## braid-viewer (desktop)
+
+`braid-viewer` is a native desktop app (Tauri v2) that wraps the braid
+React UI. Open multiple project folders, switch skeins, sync directly to
+your sync server — no CLI or local server required.
+
+```sh
+cargo xtask viewer-dev    # hot-reload dev (needs tauri-cli + Node.js)
+cargo xtask viewer-build  # production bundle (.app / .exe / .AppImage)
+```
+
+`cargo xtask viewer-build` is the only command that produces a runnable
+app — a plain `cargo build --release -p braid-viewer` omits Tauri's
+`custom-protocol` feature and starts in dev mode (blank
+`ERR_CONNECTION_REFUSED` window). Per-OS prerequisites, logs/debugging,
+offline/warm-start via IndexedDB, and CSP configuration:
+[docs/viewer.md](docs/viewer.md).
+
 ## MCP server
 
 `braid mcp` serves the skein to MCP hosts over stdio — for shell-less
@@ -244,13 +262,16 @@ tolerances and the deltas vs the automerge document shape.
 ## Development
 
 ```sh
-cargo test --workspace      # 120+ tests, no network required
-cargo clippy --workspace --all-targets
+cargo test        # 120+ tests, no network required (default-members only)
+cargo clippy --all-targets
 ```
 
-The workspace has two crates: `braid-core` (schema, automerge
-hydrate/reconcile, ready/blocked logic — no I/O) and `braid` (CLI, config
-discovery, cache, sync). Design decisions and phase history live in
+The workspace has four crates: `braid-core` (schema, automerge
+hydrate/reconcile, ready/blocked logic — no I/O), `braid` (CLI, config
+discovery, cache, sync), `braid-config` (lean config/registry shared by
+braid and braid-viewer), and `braid-viewer` (Tauri desktop app, excluded
+from default builds — use `cargo xtask viewer-*` or `-p braid-viewer`).
+Design decisions and phase history live in
 `claude-notes/plans/2026/06/03/braid-design-kickoff.md`; vocabulary in
 `docs/terminology.md`. This repo dogfoods braid — run `braid list` here
 to see its own skein.
