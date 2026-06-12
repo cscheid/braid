@@ -17,6 +17,8 @@ while replacing the git-committed `issues.jsonl` + SQLite machinery with a
 synced document. (That JSONL file still matters: `braid import` migrates
 it.)
 
+![The braid web UI: a stage view with status lanes and priority-coloured strand cards.](docs/braid-ui.webp)
+
 ## Installation
 
 ```sh
@@ -208,6 +210,17 @@ doc id**. Three capability tiers (`--read-only` / default /
 `--enable-destructive`), honest tool annotations, call-time enforcement.
 Setup snippets and semantics: [docs/mcp.md](docs/mcp.md). Shell-capable
 agents should prefer the CLI (`braid agents-info`).
+
+## Web UI
+
+```sh
+braid ui
+```
+
+Opens the skein in your browser (see the screenshot above) — a quick way
+to browse, triage, and edit strands without the terminal. Strands are laid
+out in lanes by status, each card colour-coded by priority, with live
+search, a light/dark theme, and inline editing.
 
 ## Migrating from beads
 
