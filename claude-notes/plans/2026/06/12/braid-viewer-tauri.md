@@ -77,52 +77,43 @@ default-build leakage ever bites.
 ## Implementation plan
 
 ### Phase 0 — Prerequisites
-- [ ] Per-OS Tauri deps: **Linux** webkit2gtk-4.1/soup-3/rsvg2/appindicator + build-essential/openssl;
+- [x] Per-OS Tauri deps: **Linux** webkit2gtk-4.1/soup-3/rsvg2/appindicator + build-essential/openssl;
       **macOS** Xcode CLT; **Windows** MSVC + `x86_64-pc-windows-msvc` + WebView2 runtime.
-- [ ] `cargo install tauri-cli --version "^2"`. Pin the four `tauri*`/`@tauri-apps/*`
+- [x] `cargo install tauri-cli --version "^2"`. Pin the four `tauri*`/`@tauri-apps/*`
       packages exact (bump together). Create+commit `app-icon.png` (≥1024) → `cargo tauri icon`.
 - [ ] Install **agent-browser** (`npm i -g agent-browser && agent-browser install --with-deps`).
       Confirm network policy allows tauri crates + `@tauri-apps/*` npm + Chromium.
 
 ### Phase 1 — Refactor + tests first (TDD)
-- [ ] Extract **`crates/braid-config`**: move `config.rs` + `docid.rs` out of `braid`;
+- [x] Extract **`crates/braid-config`**: move `config.rs` + `docid.rs` out of `braid`;
       `braid` adds `pub use braid_config::{config, docid};` (public paths unchanged →
       existing config/secret_hygiene tests pass untouched). Add `braid-config` to
       `members` + `default-members`.
-- [ ] In `braid-config`: `doc_url(doc_id) -> String` (the `automerge:` prefix at
-      `ui.rs:47-49`), `UiConfig{doc_url,sync_server}`, and `ui_config(folder)` that
-      **parses `<folder>/.braid.toml` directly** (FileConfig + `DEFAULT_SYNC_SERVER`) —
-      **no walk-up, ignore `BRAID_*` env** (strict folder semantics; see Gotcha).
-      Refactor `braid`'s web `config_handler` (`ui.rs:80`) to keep using `config::load`
-      (web behavior unchanged) but share `doc_url()`.
-- [ ] `braid-config::viewer` registry + tests: add/list/remove folders round-trip
+- [x] In `braid-config`: `doc_url_str(raw) -> String` (`ui_config.rs`), `UiConfig{doc_url,sync_server}`,
+      and `ui_config(folder)` that **parses `<folder>/.braid.toml` directly** (FileConfig +
+      `DEFAULT_SYNC_SERVER`) — **no walk-up, ignore `BRAID_*` env** (strict folder semantics).
+- [ ] `braid-config::viewer` registry **tests**: add/list/remove folders round-trip
       through `viewer.toml`; `add_project` requires a parseable `<folder>/.braid.toml`
-      with a `doc_id`. **Secret-hygiene test** (mirror `secret_hygiene.rs`): `viewer.toml`
-      contains no `doc_id`/`docUrl` substring.
+      with a `doc_id`. **Secret-hygiene test**: `viewer.toml` contains no `doc_id`/`docUrl` substring.
+      *(Registry code exists in `viewer.rs`; tests not yet written.)*
 
 ### Phase 2 — braid-viewer Rust backend (thin)
-- [ ] Commands in `src/lib.rs` over `braid_config::*`: `list_projects`, `add_project`,
-      `remove_project`, `get_config(folder)`. **Never log `UiConfig`/`docUrl`.**
-- [ ] Startup: compute `connect-src` allowlist = `wss://sync.automerge.org` ∪ registered
-      projects' sync servers ∪ `viewer.toml allowed_sync_servers`; inject via
-      `WebviewWindowBuilder::on_web_resource_request` (rewrites the `tauri://` doc CSP) —
-      fallback: a custom uri-scheme protocol handler that sets the header, or static `wss:`.
-      **Per-project parse errors isolated** (one bad `.braid.toml` must not break startup).
-- [ ] Set `WebviewWindowBuilder::data_directory(<app-data dir>)` so IndexedDB persists
-      deterministically; `src/main.rs` registers `tauri_plugin_dialog` + `invoke_handler![…]`.
+- [x] Commands in `src/lib.rs` (`mod commands` submodule to avoid E0255): `list_projects_cmd`,
+      `add_project_cmd`, `remove_project_cmd`, `get_config_cmd`. Never logs `UiConfig`/`docUrl`.
+- [ ] **CSP runtime injection**: `_extra_servers` is computed at startup but not yet injected
+      into the webview CSP via `on_web_resource_request`. For v1 the static `wss:` fallback
+      in `tauri.conf.json` covers the default server; inject dynamically when multi-server matters.
+- [x] Dialog plugin registered; `ConfigDir` state managed; commands wired into `invoke_handler!`.
+- [ ] `WebviewWindowBuilder::data_directory(…)` not yet set — IndexedDB will use the default
+      location. Set explicitly for deterministic persistence (needed before offline/warm-start works).
 
 ### Phase 3 — Tauri scaffold
-- [ ] `Cargo.toml` (tauri, tauri-build, tauri-plugin-dialog, **braid-config** path dep, serde);
-      `build.rs` = `tauri_build::build()`; `tauri.conf.json`: one window,
-      `identifier="org.cscheid.braidviewer"`, **Windows `useHttpsScheme` set once & kept stable**
-      (changing it relocates webview storage).
-- [ ] Static baseline CSP: `default-src 'self'; script-src 'self' 'wasm-unsafe-eval';
-      connect-src 'self' ipc: http://ipc.localhost wss://sync.automerge.org` (+ runtime
-      extras from Phase 2; documented `'unsafe-eval'` fallback for old WebKitGTK).
-- [ ] `capabilities/default.json`: `core:default` + `dialog:allow-open` (verified). App
-      commands need no capability (verified). Build hooks (object form, `cwd:"../../ui"`):
-      `beforeDevCommand npm run dev`, `beforeBuildCommand npm run build`,
-      `frontendDist:"../../ui/dist"`, `devUrl:"http://localhost:5173"`.
+- [x] `Cargo.toml` (tauri, tauri-build, tauri-plugin-dialog, braid-config, serde, time pinned to
+      `=0.3.47` to avoid Rust 1.94 E0119 coherence conflict with tauri's blanket `From` impls).
+- [x] `build.rs` = `tauri_build::build()`.
+- [x] `tauri.conf.json`: one window (1200×800), `identifier="org.cscheid.braidviewer"`, static
+      baseline CSP, build hooks (`cwd:"../../ui"`, `devUrl`, `frontendDist`).
+- [x] `capabilities/default.json`: `core:default` + `dialog:allow-open`.
 
 ### Phase 4 — Frontend (reuse `ui/`)
 - [ ] Add `@tauri-apps/api`, `@tauri-apps/plugin-dialog`,
@@ -137,22 +128,13 @@ default-build leakage ever bites.
       Feed `docUrl` into the unchanged `<ConnectedApp/>`.
 
 ### Phase 5 — Build & workflow (the load-bearing CI fix)
-- [ ] Root `Cargo.toml`: `members += braid-config, braid-viewer`;
-      `default-members = ["crates/braid-core","crates/braid-config","crates/braid","crates/xtask"]`
-      (ergonomics only).
-- [ ] **Config-only exclusion (no `--exclude` flags):** with `default-members` set,
-      change `cargo xtask ci` `CI_STEPS` (`xtask/src/main.rs:28-30`) **and**
-      `.github/workflows/ci.yml` test/windows/musl jobs (`:45-47,:66-68,:113-114`) to
-      **drop `--workspace`** (bare `cargo build/test/clippy --all-targets`). At the virtual
-      workspace root, bare cargo operates on `default-members`, so the viewer is skipped
-      automatically — exactly what `default-members` is for. (`-p braid-viewer` + the
-      dedicated viewer job still build it.) Full isolation from anything hardcoding
-      `--workspace` (e.g. rust-analyzer) would need a nested workspace — only if it bites.
-- [ ] Because the viewer depends on lean **braid-config** (not `braid`), building it does
-      **not** trigger braid's `build.rs`/rust-embed → **no double UI build, no `SKIP_UI_BUILD`
-      hack, leaner binary**. (Also harden `build.rs:62` `ensure_stub` to not overwrite a
-      real `index.html`; fix the stale "dist is committed" comments at `build.rs:3-12`,
-      `xtask:94-96`.)
+- [x] Root `Cargo.toml`: `members += braid-config, braid-viewer`;
+      `default-members = ["crates/braid-core","crates/braid-config","crates/braid","crates/xtask"]`.
+- [ ] **Drop `--workspace` in CI/xtask**: `xtask/src/main.rs:28-30` `CI_STEPS` still uses
+      `--workspace` for clippy/build/test; `.github/workflows/ci.yml` lines 45-47, 66-68,
+      113-114 also still use `--workspace`. Change these to bare commands (no `--workspace`)
+      so `default-members` naturally excludes `braid-viewer`. (`-p braid-viewer` + the
+      dedicated viewer job still build it explicitly.)
 - [ ] xtask `viewer-dev`→`cargo tauri dev`, `viewer-build`→`cargo tauri build`. v1
       deliverable = `cargo build --release -p braid-viewer` (bare executable). Verify vite
       assets resolve under `tauri://` (empirical gate; only env-gate `base:"./"` if 404s).
