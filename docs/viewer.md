@@ -21,6 +21,14 @@ Install `tauri-cli` once:
 cargo install tauri-cli --version '^2' --locked
 ```
 
+The viewer's frontend (project chooser, switching, add/remove) has React
+component tests under `ui/src/*.test.tsx` (vitest + Testing Library, with Tauri
+and automerge mocked). Run them with:
+```sh
+cargo xtask test-ui     # or: cd ui && npm run test
+```
+They also run as part of `cargo xtask ci` and in `ci.yml`.
+
 > **Do not** run `cargo build --release -p braid-viewer` to launch the app.
 > In Tauri v2 a runnable binary requires the `custom-protocol` feature, which
 > only the Tauri CLI (`cargo tauri build`/`cargo xtask viewer-build`) sets. A

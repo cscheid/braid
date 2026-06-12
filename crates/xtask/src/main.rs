@@ -14,9 +14,10 @@ usage: cargo xtask <command>
 
 commands:
   ci [--dry-run]   run the full CI pipeline locally (fmt --check, clippy,
-                   build, test); --dry-run prints the commands instead
+                   build, test, UI tests); --dry-run prints the commands
   fmt              apply formatting (cargo fmt --all)
   build-ui         build the React UI (npm ci + vite build) in ui/
+  test-ui          run the React UI unit tests (vitest) in ui/
   viewer-dev       run braid-viewer in Tauri dev mode (`cargo tauri dev`)
                    requires `cargo install tauri-cli --version '^2'`
   viewer-build     build the braid-viewer Tauri app bundle (`cargo tauri build`)
@@ -43,6 +44,7 @@ fn main() {
         Some("ci") => ci(&args[1..]),
         Some("fmt") => run_steps(&[&["cargo", "fmt", "--all"]]),
         Some("build-ui") => build_ui(),
+        Some("test-ui") => test_ui(),
         Some("viewer-dev") => viewer_tauri("dev"),
         Some("viewer-build") => viewer_tauri("build"),
         Some("install-hooks") => install_hooks(),
@@ -60,11 +62,20 @@ fn main() {
 
 fn ci(flags: &[String]) -> i32 {
     match flags {
-        [] => run_steps(CI_STEPS),
+        [] => {
+            // Cargo pipeline first; the cargo build already runs `npm ci`
+            // (braid's build.rs), so node_modules is present for the UI tests.
+            let code = run_steps(CI_STEPS);
+            if code != 0 {
+                return code;
+            }
+            test_ui()
+        }
         [f] if f == "--dry-run" => {
             for step in CI_STEPS {
                 println!("{}", step.join(" "));
             }
+            println!("npm --prefix ui run test");
             0
         }
         other => {
@@ -96,47 +107,54 @@ fn run_steps(steps: &[&[&str]]) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// build-ui
+// build-ui / test-ui
 // ---------------------------------------------------------------------------
 
-/// Build the React UI in `ui/` using npm.
-///
-/// The built output (`ui/dist/`) is committed to the repository so that
-/// `cargo build` works without Node.js — only run this when UI source changes.
-fn build_ui() -> i32 {
+/// Run `npm <args>` in `ui/`, returning a process-style exit code.
+fn ui_npm(args: &[&str]) -> i32 {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
-    let ui_dir = PathBuf::from(&manifest).join("../../ui");
-    let ui_dir = match ui_dir.canonicalize() {
+    let ui_dir = match PathBuf::from(&manifest).join("../../ui").canonicalize() {
         Ok(p) => p,
         Err(e) => {
             eprintln!("xtask: cannot find ui/ directory: {e}");
             return 1;
         }
     };
-
-    eprintln!("xtask: building UI in {}", ui_dir.display());
-
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
-
-    for step_args in [&["ci"][..], &["run", "build"][..]] {
-        let pretty = format!("npm {}", step_args.join(" "));
-        eprintln!("xtask: {pretty}");
-        match Command::new(npm).args(step_args).current_dir(&ui_dir).status() {
-            Ok(st) if st.success() => {}
-            Ok(st) => {
-                eprintln!("xtask: FAILED ({st}): {pretty}");
-                return 1;
-            }
-            Err(e) => {
-                eprintln!("xtask: cannot run {pretty}: {e}");
-                eprintln!("xtask: is Node.js / npm installed?");
-                return 1;
-            }
+    let pretty = format!("npm {}", args.join(" "));
+    eprintln!("xtask: {pretty} (in {})", ui_dir.display());
+    match Command::new(npm).args(args).current_dir(&ui_dir).status() {
+        Ok(st) if st.success() => 0,
+        Ok(st) => {
+            eprintln!("xtask: FAILED ({st}): {pretty}");
+            1
+        }
+        Err(e) => {
+            eprintln!("xtask: cannot run {pretty}: {e}");
+            eprintln!("xtask: is Node.js / npm installed?");
+            1
         }
     }
+}
 
+/// Build the React UI in `ui/` using npm.
+///
+/// The built output (`ui/dist/`) is committed to the repository so that
+/// `cargo build` works without Node.js — only run this when UI source changes.
+fn build_ui() -> i32 {
+    for args in [&["ci"][..], &["run", "build"][..]] {
+        let code = ui_npm(args);
+        if code != 0 {
+            return code;
+        }
+    }
     eprintln!("xtask: UI built — commit ui/dist/ if the output changed");
     0
+}
+
+/// Run the React UI unit tests (vitest, headless).
+fn test_ui() -> i32 {
+    ui_npm(&["run", "test"])
 }
 
 // ---------------------------------------------------------------------------

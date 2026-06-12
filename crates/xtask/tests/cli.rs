@@ -65,6 +65,7 @@ fn ci_dry_run_prints_the_pipeline_in_order() {
             "cargo clippy --all-targets -- -D warnings",
             "cargo build --all-targets",
             "cargo test",
+            "npm --prefix ui run test",
         ],
         "ci --dry-run must print exactly the pipeline, one command per line"
     );
