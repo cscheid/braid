@@ -92,10 +92,10 @@ default-build leakage ever bites.
 - [x] In `braid-config`: `doc_url_str(raw) -> String` (`ui_config.rs`), `UiConfig{doc_url,sync_server}`,
       and `ui_config(folder)` that **parses `<folder>/.braid.toml` directly** (FileConfig +
       `DEFAULT_SYNC_SERVER`) — **no walk-up, ignore `BRAID_*` env** (strict folder semantics).
-- [ ] `braid-config::viewer` registry **tests**: add/list/remove folders round-trip
+- [x] `braid-config::viewer` registry **tests**: add/list/remove folders round-trip
       through `viewer.toml`; `add_project` requires a parseable `<folder>/.braid.toml`
       with a `doc_id`. **Secret-hygiene test**: `viewer.toml` contains no `doc_id`/`docUrl` substring.
-      *(Registry code exists in `viewer.rs`; tests not yet written.)*
+      *(6 new unit tests in `viewer.rs`; all 25 braid-config tests pass.)*
 
 ### Phase 2 — braid-viewer Rust backend (thin)
 - [x] Commands in `src/lib.rs` (`mod commands` submodule to avoid E0255): `list_projects_cmd`,
@@ -116,39 +116,40 @@ default-build leakage ever bites.
 - [x] `capabilities/default.json`: `core:default` + `dialog:allow-open`.
 
 ### Phase 4 — Frontend (reuse `ui/`)
-- [ ] Add `@tauri-apps/api`, `@tauri-apps/plugin-dialog`,
-      `@automerge/automerge-repo-storage-indexeddb` to `ui/package.json`.
-- [ ] `App.tsx` branch on `isTauri()` (`@tauri-apps/api/core`, verified): **Web** keeps
+- [x] Add `@tauri-apps/api`, `@tauri-apps/plugin-dialog`,
+      `@automerge/automerge-repo-storage-indexeddb` to `ui/package.json`; `npm install`
+      updates `package-lock.json`.
+- [x] `App.tsx` branch on `isTauri()` (`@tauri-apps/api/core`): **Web** keeps
       `fetch("/api/config")`; **Viewer** renders a project shell (`list_projects`, selector,
-      "Add project" → dialog `open({directory:true})` → `add_project`; remember last-active).
-- [ ] **Repo lifecycle** (also fixes today's leak at `App.tsx:35`): create Repo in a
-      `useEffect` keyed on `activeProjectId` with an **abort/generation guard** so a
-      late-resolving `shutdown()` can't clobber the new repo; cleanup awaits/chains
-      `shutdown()`; add the **IndexedDB** adapter **namespaced per project** (drop `isEphemeral`).
+      "Add project" → dialog `open({directory:true})` → `add_project`; remember last-active
+      in localStorage).
+- [x] **Repo lifecycle** (also fixes today's leak at `App.tsx:35`): create Repo in a
+      `useEffect` keyed on `[activeFolder, projectKey]` with an **abort guard** (`alive`
+      flag) so late-resolving async can't clobber the new repo; cleanup calls
+      `repo.shutdown()`; IndexedDB adapter **namespaced per project** (`braid-proj-${folder}`).
       Feed `docUrl` into the unchanged `<ConnectedApp/>`.
 
 ### Phase 5 — Build & workflow (the load-bearing CI fix)
 - [x] Root `Cargo.toml`: `members += braid-config, braid-viewer`;
       `default-members = ["crates/braid-core","crates/braid-config","crates/braid","crates/xtask"]`.
-- [ ] **Drop `--workspace` in CI/xtask**: `xtask/src/main.rs:28-30` `CI_STEPS` still uses
-      `--workspace` for clippy/build/test; `.github/workflows/ci.yml` lines 45-47, 66-68,
-      113-114 also still use `--workspace`. Change these to bare commands (no `--workspace`)
-      so `default-members` naturally excludes `braid-viewer`. (`-p braid-viewer` + the
-      dedicated viewer job still build it explicitly.)
-- [ ] xtask `viewer-dev`→`cargo tauri dev`, `viewer-build`→`cargo tauri build`. v1
-      deliverable = `cargo build --release -p braid-viewer` (bare executable). Verify vite
-      assets resolve under `tauri://` (empirical gate; only env-gate `base:"./"` if 404s).
+- [x] **Drop `--workspace` in CI/xtask**: `xtask/src/main.rs` `CI_STEPS` no longer uses
+      `--workspace` for clippy/build/test; `.github/workflows/ci.yml` test/windows/musl jobs
+      updated. `default-members` naturally excludes `braid-viewer`. Updated xtask cli.rs test.
+- [x] xtask `viewer-dev`→`cargo tauri dev`, `viewer-build`→`cargo tauri build`. Both invoke
+      `cargo tauri <sub>` in `crates/braid-viewer/` with a helpful install hint if tauri-cli
+      is missing.
 
 ### Phase 6 — CI (lean)
-- [ ] New `viewer` job: matrix ubuntu/macos/windows **+ ubuntu-22.04** (LTS WebKitGTK floor);
-      install per-OS deps + tauri-cli; `cargo build -p braid-viewer` smoke. Existing jobs gain
-      `--exclude braid-viewer` (above) → stay green, musl unaffected.
+- [x] New `viewer` job: matrix ubuntu-latest/ubuntu-22.04/macos-latest/windows-latest;
+      Linux installs WebKitGTK 4.1 deps; `cargo build -p braid-viewer` smoke. Existing jobs
+      use `default-members` (no `--workspace`) → stay green, musl unaffected.
 - [ ] **Defer** producing/attaching `.dmg/.msi/.AppImage` until the app runs on all 3 webviews.
 
 ### Phase 7 — Docs
-- [ ] `docs/viewer.md` (per-OS run incl. one-time mac/Windows first-run bypass; min WebKitGTK;
-      `allowed_sync_servers`; `cargo tauri icon`); README "braid-viewer (desktop)". No
-      `docs_drift.rs` impact (own binary, not a subcommand/MCP tool).
+- [x] `docs/viewer.md` (per-OS run incl. one-time mac/Windows first-run bypass; min WebKitGTK;
+      `allowed_sync_servers`; architecture diagram); README "braid-viewer (desktop)" section +
+      updated Development section. No `docs_drift.rs` impact (own binary, not a
+      subcommand/MCP tool).
 
 ### Phase 8 — Deferred
 - [ ] Installers + macOS notarization + Windows signing. Project labels/reordering. Path B.
