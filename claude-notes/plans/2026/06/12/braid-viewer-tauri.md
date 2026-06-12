@@ -248,6 +248,10 @@ default-build leakage ever bites.
       Path B (Rust-side automerge). Tracked here as the post-v1 backlog — not pending work for this
       branch. Also folds in the deferred bundle step from Phase 6 and the CSP runtime injection from
       Phase 2 (wire in when a non-default sync server first appears).
+- [ ] **Follow-up (minor):** commit the source `app-icon.png` (≥1024px). The generated
+      `crates/braid-viewer/icons/*` are committed (correct — build inputs), but the source they came
+      from isn't, so the icon set can't be regenerated via `cargo tauri icon` without it. No build
+      impact. (Note: `gen/schemas/*` is now gitignored — generated per-platform, never tracked.)
 
 ## Critical files
 - Move/refactor: `crates/braid/src/config.rs` + `docid.rs` → `braid-config` (re-export);
