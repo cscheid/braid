@@ -16,15 +16,7 @@
     "devUrl": "http://localhost:5173"
   },
   "app": {
-    "windows": [
-      {
-        "title": "braid viewer",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' ipc: http://ipc.localhost wss://sync.automerge.org; img-src 'self' data: asset: https://asset.localhost"
     }

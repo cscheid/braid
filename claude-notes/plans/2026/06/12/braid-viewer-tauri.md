@@ -103,7 +103,10 @@ default-build leakage ever bites.
 ### Phase 2 — braid-viewer Rust backend (thin)
 - [x] Commands in `src/lib.rs` (`mod commands` submodule to avoid E0255): `list_projects_cmd`,
       `add_project_cmd`, `remove_project_cmd`, `get_config_cmd`. Never logs `UiConfig`/`docUrl`.
-- [ ] **CSP runtime injection** *(gate: only needed if a project uses a non-default sync server)*
+- [ ] **CSP runtime injection** *(DEFERRED — gate not hit: all projects use the default
+      `wss://sync.automerge.org`, which the static CSP already allows. Implement when a
+      project first needs a non-default/self-hosted sync server. `_extra_servers` is still
+      computed in `run()` ready to wire in.)*
 
   **Status:** `_extra_servers` is computed in `run()` but dropped (`_` prefix). The static CSP
   in `tauri.conf.json` only allows `wss://sync.automerge.org`; any other server is silently
@@ -140,9 +143,15 @@ default-build leakage ever bites.
      in `tauri dev`. Always verify with `cargo build --release -p braid-viewer`.
 
 - [x] Dialog plugin registered; `ConfigDir` state managed; commands wired into `invoke_handler!`.
-- [ ] **`data_directory`** *(gate: only needed if IndexedDB doesn't persist at the WebView default location)*
+- [x] **`data_directory`** *(DONE — offline/warm-start wanted, so persistence is now deterministic
+      rather than relying on per-engine defaults.)* The main window is built programmatically in
+      `setup` via `WebviewWindowBuilder` (Tauri v2 exposes `data_directory` only per-window, not on
+      the global builder) with `.data_directory(app_local_data_dir())`; `tauri.conf.json` now
+      declares `"windows": []`. Independent of the CLI's `samod` cache (`~/.cache/braid`) — separate
+      replicas converging via the sync server. **Still verify** warm start empirically per OS
+      (esp. WebKitGTK): launch → sync → quit → relaunch offline → skein loads without the server.
 
-  **Status:** not set — each engine uses its own default:
+  **Previous status (now superseded):** not set — each engine used its own default:
   - **Windows/WebView2:** `%AppData%\org.cscheid.braidviewer\EBWebView\Default`
   - **macOS/WKWebView:** `~/Library/WebKit/org.cscheid.braidviewer`
   - **Linux/WebKitGTK:** `~/.local/share/org.cscheid.braidviewer`

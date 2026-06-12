@@ -102,13 +102,31 @@ are stored in `~/.config/braid/viewer.toml` — **paths only, never secrets**.
 
 ## Offline / warm start
 
-The viewer uses IndexedDB (via `@automerge/automerge-repo-storage-indexeddb`)
-to cache each project's skein locally, namespaced by folder path. Cached data
-persists across restarts and loads while the sync server is unreachable.
+The viewer caches each project's skein in **IndexedDB** (via
+`@automerge/automerge-repo-storage-indexeddb`), namespaced by folder path. The
+backend pins the webview's `data_directory` to the OS app-local data dir
+(`app_local_data_dir`, e.g. `%LOCALAPPDATA%\org.cscheid.braidviewer` on Windows,
+`~/.local/share/org.cscheid.braidviewer` on Linux) so that cache survives
+restarts deterministically. Cached data loads instantly and while the sync
+server is unreachable; offline edits merge back on reconnect (automerge is a
+CRDT, so this is conflict-free).
 
-> **Note:** IndexedDB persistence under WebKitGTK (`tauri://` scheme on Linux)
-> is empirically verified per OS — confirm on each target before relying on it
-> in production.
+> **Verify per OS:** IndexedDB persistence under WebKitGTK (`tauri://` scheme on
+> Linux) has been historically unreliable. Confirm warm start on each target —
+> launch, sync, quit, relaunch offline, and check the skein loads without the
+> server.
+
+### Relationship to the braid CLI cache
+
+The viewer's cache is **independent** of the `braid` CLI's. They are separate
+automerge replicas of the same document using different storage engines:
+
+- **CLI:** `samod` filesystem storage at `XDG_CACHE_HOME/braid` (`~/.cache/braid`).
+- **Viewer:** browser IndexedDB inside the pinned webview `data_directory` above.
+
+They can't (and shouldn't) share a directory — the formats differ. Both sync to
+the same server, so they converge there; a CLI edit appears in the viewer once
+both have synced (they don't talk directly — only through the sync server).
 
 ## Custom sync servers (`allowed_sync_servers`)
 
