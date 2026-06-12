@@ -201,6 +201,13 @@ default-build leakage ever bites.
       flag) so late-resolving async can't clobber the new repo; cleanup calls
       `repo.shutdown()`; IndexedDB adapter **namespaced per project** (`braid-proj-${folder}`).
       Feed `docUrl` into the unchanged `<ConnectedApp/>`.
+- [x] **In-app project switcher** (post-merge): `⇄ Projects` header button (viewer-only, via an
+      optional `onSwitchProject` prop on `ConnectedApp`) returns to the chooser; chooser gains a
+      per-project `×` calling the already-wired `remove_project_cmd`.
+- [x] **UI tests** (vitest + Testing Library, Tauri/automerge mocked): `ui/src/App.viewer.test.tsx`
+      covers chooser listing, empty state, remove, switch-back, and last-project memory. Wired into
+      `cargo xtask test-ui` + `cargo xtask ci` + `ci.yml` (Linux). `ui/dist` is gitignored;
+      test files excluded from the `tsc -b` production build.
 
 ### Phase 5 — Build & workflow (the load-bearing CI fix)
 - [x] Root `Cargo.toml`: `members += braid-config, braid-viewer`;

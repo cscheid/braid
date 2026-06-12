@@ -46,6 +46,14 @@ jobs:
       - run: cargo build --all-targets
       - run: cargo test
       - run: cargo clippy --all-targets -- -D warnings
+      # React UI unit tests (vitest). `cargo build` above already ran `npm ci`
+      # via braid's build.rs; re-run it so the step is robust to caching.
+      # Linux only — the suite is OS-independent (jsdom). Mirrors `cargo xtask
+      # ci`, which runs the same tests after its cargo pipeline.
+      - name: UI unit tests (vitest)
+        if: runner.os == 'Linux'
+        working-directory: ui
+        run: npm ci && npm run test
 
   # Windows (x86_64-pc-windows-msvc) build + test. minisign is not needed:
   # the install.sh tests are cfg(unix) (they run bash and shell shims), so
