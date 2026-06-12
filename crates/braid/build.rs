@@ -33,8 +33,8 @@ fn main() {
 
     let npm = npm_cmd();
 
-    run_npm(&npm, &["ci"], &ui_dir);
-    run_npm(&npm, &["run", "build"], &ui_dir);
+    run_npm(npm, &["ci"], &ui_dir);
+    run_npm(npm, &["run", "build"], &ui_dir);
 }
 
 fn run_npm(npm: &str, args: &[&str], cwd: &Path) {
