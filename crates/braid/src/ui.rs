@@ -24,6 +24,8 @@ use axum::routing::get;
 use serde_json::json;
 use tokio::net::TcpListener;
 
+use braid_config::ui_config::doc_url_str;
+
 use crate::config;
 
 // Embed the pre-built React app. Path is relative to this crate's Cargo.toml.
@@ -41,12 +43,7 @@ struct UiState {
 pub async fn serve(cwd: &Path) -> Result<()> {
     let cfg = config::load(cwd)?;
 
-    // expose_secret() returns whatever string was stored in .braid.toml.
-    // The automerge-repo JS library expects "automerge:<id>"; add the prefix
-    // if the stored value is the bare id (samod historically omitted it).
-    let raw = cfg.doc_id.expose_secret();
-    let doc_url =
-        if raw.starts_with("automerge:") { raw.to_string() } else { format!("automerge:{raw}") };
+    let doc_url = doc_url_str(cfg.doc_id.expose_secret());
 
     let state = Arc::new(UiState { doc_url, sync_server: cfg.sync_server.clone() });
 
