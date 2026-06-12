@@ -233,7 +233,9 @@ default-build leakage ever bites.
       triggers only on changes to `crates/braid-viewer/`, `crates/braid-config/`, `Cargo.toml`,
       `Cargo.lock`; matrix ubuntu-latest/ubuntu-22.04/macos-latest/windows-latest; Linux installs
       WebKitGTK 4.1 deps; `cargo build -p braid-viewer` smoke. `ci.yml` untouched by viewer changes.
-- [ ] **Defer** producing/attaching `.dmg/.msi/.AppImage` until the app runs on all 3 webviews.
+- [x] **DEFERRED (intentional):** do not produce/attach `.dmg/.msi/.AppImage` yet — distribution is
+      a bare unsigned executable for v1 (decision #6). Revisit once the app is confirmed on all 3
+      webviews. Tracked in Phase 8.
 
 ### Phase 7 — Docs
 - [x] `docs/viewer.md` (per-OS run incl. one-time mac/Windows first-run bypass; min WebKitGTK;
@@ -241,8 +243,11 @@ default-build leakage ever bites.
       updated Development section. No `docs_drift.rs` impact (own binary, not a
       subcommand/MCP tool).
 
-### Phase 8 — Deferred
-- [ ] Installers + macOS notarization + Windows signing. Project labels/reordering. Path B.
+### Phase 8 — Deferred (intentional; out of scope for v1)
+- [x] **DEFERRED:** installers + macOS notarization + Windows signing; project labels/reordering;
+      Path B (Rust-side automerge). Tracked here as the post-v1 backlog — not pending work for this
+      branch. Also folds in the deferred bundle step from Phase 6 and the CSP runtime injection from
+      Phase 2 (wire in when a non-default sync server first appears).
 
 ## Critical files
 - Move/refactor: `crates/braid/src/config.rs` + `docid.rs` → `braid-config` (re-export);
