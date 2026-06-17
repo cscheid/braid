@@ -67,21 +67,6 @@ export function ConnectedApp({ docUrl, syncServer: _syncServer }: Props) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // When switching to list view, auto-select the first strand.
-  // When switching to stage view, clear the selection so no overlay opens.
-  useEffect(() => {
-    if (view === "list") {
-      if (!selectedId) {
-        for (const group of grouped.values()) {
-          if (group.length > 0) { setSelectedId(group[0].id); break; }
-        }
-      }
-    } else {
-      setSelectedId(null);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view]);
-
   const filteredGrouped = useMemo(() => {
     if (!query.trim()) return grouped;
     const q = query.toLowerCase();
@@ -99,6 +84,25 @@ export function ConnectedApp({ docUrl, syncServer: _syncServer }: Props) {
     }
     return result;
   }, [grouped, query]);
+
+  // Leaving list view clears the selection so no detail overlay opens in
+  // stage view. (Kept transition-bound: clearing on every change would
+  // close the stage overlay as soon as you click a card.)
+  useEffect(() => {
+    if (view !== "list") setSelectedId(null);
+  }, [view]);
+
+  // In list view, keep the selection pointing at a strand that is actually
+  // visible. When the filter (or view switch) hides the selected strand,
+  // fall back to the first visible strand — or clear it if none match.
+  useEffect(() => {
+    if (view !== "list") return;
+    const visible: string[] = [];
+    for (const group of filteredGrouped.values()) {
+      for (const issue of group) visible.push(issue.id);
+    }
+    setSelectedId(cur => (cur && visible.includes(cur) ? cur : (visible[0] ?? null)));
+  }, [view, filteredGrouped]);
 
   const selectedIssue = selectedId ? byId.get(selectedId) ?? null : null;
   const prefix = doc?.metadata?.id_prefix ?? "br";
