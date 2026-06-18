@@ -54,6 +54,14 @@ debug a launch failure. Logs are also forwarded to the webview console
 (right-click → **Inspect**; available in release because the `devtools` feature
 is enabled).
 
+## Installing a release bundle
+
+Pre-built desktop bundles (macOS `.dmg`, Windows installer, Linux
+`.AppImage`/`.deb`) are attached to each
+[release](https://github.com/cscheid/braid/releases). They are currently
+unsigned — on macOS, right-click → Open the first time; on Windows, choose
+"More info → Run anyway" at the SmartScreen prompt.
+
 ## Per-OS prerequisites
 
 ### Linux (Ubuntu / Debian)

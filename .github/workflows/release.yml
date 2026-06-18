@@ -414,6 +414,23 @@ jobs:
             echo "The trusted comment should name exactly the file you downloaded."
             echo "Checksums (all platforms): \`sha256sum -c checksums.sha256 --ignore-missing\`"
             echo
+            echo "## Desktop viewer (braid-viewer)"
+            echo
+            echo "Unsigned GUI bundles — first launch:"
+            echo "- macOS: right-click the app -> Open (Gatekeeper), or \`xattr -d com.apple.quarantine <app>\`."
+            echo "- Windows: the installer is unsigned -> SmartScreen -> More info -> Run anyway."
+            echo
+            echo "| Platform | File |"
+            echo "|---|---|"
+            echo "| macOS Apple Silicon | \`braid-viewer_${VERSION}_aarch64.dmg\` |"
+            echo "| macOS Intel | \`braid-viewer_${VERSION}_x64.dmg\` |"
+            echo "| Windows x86_64 | \`braid-viewer_${VERSION}_x64-setup.exe\` |"
+            echo "| Linux x86_64 (AppImage) | \`braid-viewer_${VERSION}_amd64.AppImage\` |"
+            echo "| Linux x86_64 (deb) | \`braid-viewer_${VERSION}_amd64.deb\` |"
+            echo "| Linux ARM64 (AppImage) | \`braid-viewer_${VERSION}_aarch64.AppImage\` |"
+            echo "| Linux ARM64 (deb) | \`braid-viewer_${VERSION}_arm64.deb\` |"
+            echo "Viewer checksums: \`sha256sum -c SHA256SUMS-viewer --ignore-missing\`"
+            echo
             echo "## Changes"
             echo
             if [ -n "$PREV_TAG" ]; then
