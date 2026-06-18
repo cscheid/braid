@@ -45,7 +45,7 @@ minisign / checksum contract those scripts rely on.
 |---|---|
 | Artifact | Platform bundles (not raw executables) |
 | Workflow shape | **Inline** job in `release.yml` (not `workflow_call`, not a separate tag-triggered workflow) |
-| Build command | `cargo tauri build` per target, via an extended `cargo xtask viewer-build` (see note) |
+| Build command | Extend `cargo xtask viewer-build` to forward trailing args; CI calls it per target (settled — see note) |
 | Windows bundle | NSIS (`-setup.exe`) |
 | Linux arm64 | Yes — parity with CLI |
 | Signing | **Unsigned** for v1; tracked as follow-up `bd-ija7ely5` |
@@ -90,7 +90,17 @@ release.yml
   | macOS x86_64 | macos-15 | x86_64-apple-darwin | `.dmg` |
   | Windows x86_64 | windows-latest | x86_64-pc-windows-msvc | `.nsis` (`-setup.exe`) |
   | Linux x86_64 | ubuntu-22.04 | x86_64-unknown-linux-gnu | `.AppImage` + `.deb` |
-  | Linux arm64 | ubuntu-24.04-arm | aarch64-unknown-linux-gnu | `.AppImage` + `.deb` |
+  | Linux arm64 | ubuntu-22.04-arm | aarch64-unknown-linux-gnu | `.AppImage` + `.deb` |
+
+  **Linux glibc floor (deliberate):** both Linux rows run on **22.04**, not
+  24.04. Unlike the CLI's `linux_arm64` (static musl, glibc-independent),
+  the viewer is dynamically linked glibc — the build host's glibc sets the
+  *minimum* glibc a user needs. Building arm64 on `ubuntu-24.04-arm` would
+  raise that floor and break older arm distros, while x86 stayed on 22.04.
+  `ubuntu-22.04-arm` keeps both arches on the same (LTS) floor, which is
+  also the WebKitGTK floor `viewer.yml` already targets. So "CLI parity"
+  here means *same arches shipped*, not *same libc strategy* — the viewer
+  is glibc-floored, the CLI is libc-free.
 
 - Steps per target:
   1. checkout at the tag ref (same as `build`).
@@ -102,25 +112,55 @@ release.yml
   6. `Swatinem/rust-cache` keyed per target.
   7. Build the bundle for the matrix target, restricting `--bundles` per
      OS to the subset above so `"targets": "all"` does not emit unwanted
-     `.app`/`.rpm`/`.msi`. **Tooling note:** `cargo xtask viewer-build`
-     today runs a bare `cargo tauri build` with no arg passthrough and no
-     `--target` (`crates/xtask/src/main.rs`, `viewer_tauri`), so it cannot
-     do per-target or bundle-restricted builds as-is. Preferred fix: extend
-     `viewer-build` to forward trailing args (`cargo xtask viewer-build --
-     --target <triple> --bundles <kind>`), keeping one build path shared by
-     local + CI. Fallback: call `cargo tauri build --target ... --bundles
-     ...` directly in CI. Decide in the plan; preferred = extend xtask.
-  8. Verify the produced bundle's version matches
-     `needs.preflight.outputs.version` (guards the version-drift fix).
+     `.app`/`.rpm`/`.msi`. **Build path (settled):** `cargo xtask
+     viewer-build` today runs a bare `cargo tauri build` with no arg
+     passthrough and no `--target` (`crates/xtask/src/main.rs`,
+     `viewer_tauri`). We **extend `viewer-build` to forward trailing args**
+     so one build path serves local + CI:
+     `cargo xtask viewer-build -- --target <triple> --bundles <kind>`. The
+     direct-`cargo tauri build` fallback is rejected — it would let CI and
+     local release builds diverge, defeating the single-build-path goal.
+     The xtask change ships with a unit test asserting trailing args are
+     forwarded verbatim to `cargo tauri build`.
+  8. Verify the produced bundle **filename** contains
+     `needs.preflight.outputs.version` (the tag's version). Filename, not
+     embedded metadata — Tauri stamps the crate version into the filename,
+     so a filename match proves the version-drift fix held. (Per-format
+     metadata inspection — Info.plist / .deb control / NSIS resources — is
+     deliberately *not* done: gold-plating for no added safety once the
+     hardcoded `tauri.conf` version is gone and a unit test guards its
+     absence; see Version drift fix.)
   9. Collect bundles into a staging dir; compute per-file SHA-256.
   10. `actions/upload-artifact` (name `braid-viewer-<platform>`).
 
+### Artifact naming
+
+We accept Tauri's **default** bundle names (no rename step) and pin the
+exact expected filenames so the `release` job's presence-check, checksum
+combine, and notes table match them. Tauri v2 names bundles
+`{productName}_{version}_{arch}.{ext}` with `productName = braid-viewer`:
+
+| Platform | Expected filename (`<v>` = workspace version) |
+|---|---|
+| macOS arm64 | `braid-viewer_<v>_aarch64.dmg` |
+| macOS x86_64 | `braid-viewer_<v>_x64.dmg` |
+| Windows x86_64 | `braid-viewer_<v>_x64-setup.exe` |
+| Linux x86_64 | `braid-viewer_<v>_amd64.AppImage`, `braid-viewer_<v>_amd64.deb` |
+| Linux arm64 | `braid-viewer_<v>_aarch64.AppImage`, `braid-viewer_<v>_arm64.deb` |
+
+Tauri's arch tokens are inconsistent across formats (`aarch64` vs `arm64`,
+`x64` vs `amd64`) — that is expected and the reason the names are pinned
+here rather than derived. The presence-check validates this exact list (it
+must fail loudly if Tauri changes a default name in a future version).
+
 ### `release` job changes
 
+- **Add `viewer` to the job's needs:** `needs: [preflight, build, viewer]`
+  so the release cannot be created before viewer artifacts exist.
 - Download viewer artifacts (already uses `download-artifact` with
   `merge-multiple`).
 - Extend the "validate all platforms present" list to require the viewer
-  bundles.
+  bundles (the exact filenames in Artifact naming above).
 - Combine viewer checksums into `SHA256SUMS-viewer`.
 - Add viewer bundles + `SHA256SUMS-viewer` to the `gh release create`
   asset list.
@@ -142,14 +182,24 @@ against regressions.
   row per bundle and an unsigned-install note:
   - macOS: first launch → right-click → Open (Gatekeeper quarantine), or
     `xattr -d com.apple.quarantine <app>`.
-  - Windows: a browser-downloaded `-setup.exe` is unsigned → SmartScreen
-    "More info → Run anyway". (Scoop/WinGet installs do not trip
-    SmartScreen — no Mark-of-the-Web.)
+  - Windows: the unsigned `-setup.exe` is unsigned → SmartScreen
+    "More info → Run anyway". **Release-note text must not mention
+    Scoop/WinGet** — there is no viewer package-manager manifest yet
+    (out of scope), and naming them would imply an install path that does
+    not exist. The Mark-of-the-Web / Scoop rationale is design context
+    only; it stays in this doc, not in user-facing notes.
 - README: add a viewer-download mention if warranted.
 - No `agents-info.md` / `docs/mcp.md` change (no new CLI subcommand or MCP
   tool), so `docs_drift.rs` is unaffected.
 
 ## Signing (deferred — `bd-ija7ely5`)
+
+**Threat model of `SHA256SUMS-viewer`:** it verifies *integrity*
+(download corruption / truncation), **not authenticity**. With no minisign
+on the viewer path, a checksum file fetched from the same (hypothetically
+compromised) GitHub Release offers no protection against a tampered
+release — authenticity is exactly what mac notarization / Authenticode
+would add. This is an accepted v1 limitation, folded into `bd-ija7ely5`.
 
 v1 ships unsigned everywhere. Evidence informing this:
 
@@ -178,7 +228,21 @@ Per repo TDD discipline, the implementation plan leads with tests:
 - The `viewer` job's in-CI step-8 version check is itself the release-time
   assertion that bundles carry the tag's version.
 - Validate the full release pipeline on a throwaway prerelease tag (manual
-  `workflow_dispatch`) before relying on it for a real release.
+  `workflow_dispatch`) before relying on it for a real release. This is the
+  chosen safety net **instead of** running a full bundle build on every PR
+  (a full `cargo tauri build` × matrix per PR is too costly); `viewer.yml`
+  keeps its cheap compile-check, the prerelease tag exercises real
+  bundling.
+- **Linux runtime deps:** `.deb` should declare its WebKitGTK / GTK
+  runtime dependencies (Tauri's deb packager derives these); the
+  `.AppImage` bundles them. The prerelease validation should install the
+  `.deb` on a clean container and launch it to confirm deps resolve.
+
+The **ordered implementation checklist** (tests/spec first → xtask arg
+forwarding → version-drift fix → `release.yml` viewer job → release-job
+wiring → release notes → prerelease validation) is produced by the
+writing-plans step that follows this design — it is intentionally not
+duplicated here.
 
 ## Out of scope
 
