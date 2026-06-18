@@ -62,9 +62,10 @@ fn ci_dry_run_prints_the_pipeline_in_order() {
         lines,
         [
             "cargo fmt --all --check",
-            "cargo clippy --workspace --all-targets -- -D warnings",
-            "cargo build --workspace --all-targets",
-            "cargo test --workspace",
+            "cargo clippy --all-targets -- -D warnings",
+            "cargo build --all-targets",
+            "cargo test",
+            "npm --prefix ui run test",
         ],
         "ci --dry-run must print exactly the pipeline, one command per line"
     );

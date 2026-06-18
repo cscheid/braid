@@ -1,0 +1,15 @@
+[package]
+name = "braid-config"
+description = "Lean config, docid, and viewer registry for braid — no heavy runtime deps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

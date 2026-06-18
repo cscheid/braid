@@ -14,9 +14,11 @@ type Theme = "dark" | "light";
 interface Props {
   docUrl: AutomergeUrl;
   syncServer: string;
+  /** Viewer mode only: return to the project chooser. Absent in web mode. */
+  onSwitchProject?: () => void;
 }
 
-export function ConnectedApp({ docUrl, syncServer: _syncServer }: Props) {
+export function ConnectedApp({ docUrl, syncServer: _syncServer, onSwitchProject }: Props) {
   const { grouped, byId, skeinName, changeDoc, isLoading, doc } = useSkein(docUrl);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
@@ -135,6 +137,13 @@ export function ConnectedApp({ docUrl, syncServer: _syncServer }: Props) {
           />
         </div>
         <div className="header-right">
+          {onSwitchProject && (
+            <button
+              className="btn btn--ghost"
+              onClick={onSwitchProject}
+              title="Switch project"
+            >⇄ Projects</button>
+          )}
           <button
             className="btn btn--ghost"
             onClick={() => setTheme(t => t === "dark" ? "light" : "dark")}

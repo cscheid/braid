@@ -6,21 +6,31 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@automerge/automerge-repo": "^2.5.1",
     "@automerge/automerge-repo-network-websocket": "^2.5.1",
     "@automerge/automerge-repo-react-hooks": "^2.5.1",
+    "@automerge/automerge-repo-storage-indexeddb": "^2.5.1",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.1.5",
     "@types/react-dom": "^19.1.5",
     "@vitejs/plugin-react": "^4.5.2",
+    "jsdom": "^29.1.1",
     "typescript": "~5.8.3",
     "vite": "^6.3.5",
-    "vite-plugin-wasm": "^3.5.0"
+    "vite-plugin-wasm": "^3.5.0",
+    "vitest": "^3.2.6"
   }
 }

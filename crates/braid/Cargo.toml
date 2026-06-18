@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 braid-core = { path = "../braid-core" }
+braid-config = { workspace = true }
 automerge = { workspace = true }
 # No "tungstenite" feature: it hardcodes native-tls → OpenSSL on Linux,
 # breaking static musl release builds. src/ws.rs provides the websocket
