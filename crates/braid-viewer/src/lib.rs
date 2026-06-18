@@ -13,6 +13,8 @@ use braid_config::viewer::{allowed_sync_servers, list_projects};
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 
+pub mod csp;
+
 /// The XDG config dir for the viewer registry, injected at setup time.
 pub struct ConfigDir(pub PathBuf);
 
@@ -144,11 +146,46 @@ pub fn run() {
                 app.path().app_local_data_dir().unwrap_or_else(|_| config_dir.join("data"));
             app.manage(ConfigDir(config_dir.clone()));
 
+            // Sync servers to allow in the webview CSP beyond the default one
+            // baked into tauri.conf.json: every registered project's server plus
+            // any explicitly listed in viewer.toml. Best-effort — a bad
+            // .braid.toml must not crash startup. This is a startup snapshot: a
+            // project added at runtime on a non-default server needs a restart
+            // (or pre-declaration in `allowed_sync_servers`) before it can sync.
+            let mut extra_servers: Vec<String> = list_projects(&config_dir)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|folder| ui_config(folder).ok())
+                .map(|c: UiConfig| c.sync_server)
+                .chain(allowed_sync_servers(&config_dir).unwrap_or_default())
+                .filter(|s| s != "wss://sync.automerge.org")
+                .collect();
+            extra_servers.sort();
+            extra_servers.dedup();
+
             tauri::WebviewWindowBuilder::new(app.handle(), "main", tauri::WebviewUrl::default())
                 .title("braid viewer")
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(800.0, 600.0)
                 .data_directory(data_dir.clone())
+                // Append the extra sync servers to the static CSP's `connect-src`
+                // so non-default servers aren't blocked in the packaged app. Only
+                // fires for the `tauri://` protocol (the packaged frontend); the
+                // dev server is untouched and needs no CSP.
+                .on_web_resource_request(move |request, response| {
+                    if extra_servers.is_empty() || request.uri().scheme_str() != Some("tauri") {
+                        return;
+                    }
+                    if let Some(header) = response.headers_mut().get_mut("Content-Security-Policy")
+                    {
+                        if let Ok(current) = header.to_str() {
+                            let augmented = csp::augment_connect_src(current, &extra_servers);
+                            if let Ok(value) = tauri::http::HeaderValue::from_str(&augmented) {
+                                *header = value;
+                            }
+                        }
+                    }
+                })
                 .build()?;
             log::info!("webview data dir: {}", data_dir.display());
 
@@ -166,19 +203,6 @@ pub fn run() {
                     Err(e) => log::warn!("window '{label}' url unavailable: {e}"),
                 }
             }
-
-            // Pre-resolve sync servers for a future CSP allowlist (best-effort;
-            // a bad .braid.toml must not crash startup). Unused until runtime CSP
-            // injection lands — the static CSP covers the default server, the
-            // only one currently in use.
-            let _extra_servers: Vec<String> = list_projects(&config_dir)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|folder| ui_config(folder).ok())
-                .map(|c: UiConfig| c.sync_server)
-                .chain(allowed_sync_servers(&config_dir).unwrap_or_default())
-                .filter(|s| s != "wss://sync.automerge.org")
-                .collect();
 
             Ok(())
         })

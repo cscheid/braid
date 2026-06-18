@@ -38,5 +38,9 @@ the log file is the trace.
 - `time` is pinned `=0.3.47` (Rust ≥1.94 coherence vs tauri). Don't unpin.
 - Viewer cache (IndexedDB) is **independent** of the CLI's `samod` cache
   (`~/.cache/braid`) — separate replicas converging via the sync server.
-- CSP `connect-src` allows only `wss://sync.automerge.org`; non-default sync
-  servers aren't supported yet.
+- CSP `connect-src` base is `wss://sync.automerge.org` (static, in
+  `tauri.conf.json`). Non-default servers (registered projects' `sync_server` +
+  `allowed_sync_servers`) are appended at runtime in `setup` via
+  `on_web_resource_request` → `csp::augment_connect_src`. The allowlist is a
+  **startup snapshot**: a project added at runtime on a non-default server needs
+  a restart before it can sync.

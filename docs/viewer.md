@@ -130,14 +130,19 @@ both have synced (they don't talk directly — only through the sync server).
 
 ## Custom sync servers (`allowed_sync_servers`)
 
-By default the CSP allows `wss://sync.automerge.org`. To permit additional
-servers, add them to `~/.config/braid/viewer.toml`:
+By default the CSP allows `wss://sync.automerge.org`. The sync server of every
+registered project is also added to the allowlist automatically. To permit a
+server before any project on it is registered, add it to
+`~/.config/braid/viewer.toml`:
 
 ```toml
 allowed_sync_servers = ["wss://my-server.example.com"]
 ```
 
-These are picked up at startup and merged into the CSP allowlist.
+The allowlist is built **once at startup** (registered project servers +
+`allowed_sync_servers`) and applied to the webview's `connect-src`. A project
+added at runtime on a non-default server therefore needs a viewer **restart**
+before it can sync — or pre-declare the server in `allowed_sync_servers`.
 
 ## Architecture
 

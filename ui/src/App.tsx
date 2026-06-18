@@ -14,6 +14,21 @@ function normalizeDocUrl(raw: string): AutomergeUrl {
   return `automerge:${raw}` as AutomergeUrl;
 }
 
+// Tauri serializes backend command errors as objects (ViewerCommandError uses
+// #[serde(tag = "kind", content = "message")]), so String(err) would render
+// "[object Object]". Pull out the human-readable message when present.
+function errorMessage(err: unknown): string {
+  if (
+    err &&
+    typeof err === "object" &&
+    "message" in err &&
+    typeof (err as { message: unknown }).message === "string"
+  ) {
+    return (err as { message: string }).message;
+  }
+  return String(err);
+}
+
 // ---- Shared splash components ------------------------------------------------
 
 function Splash({ text }: { text: string }) {
@@ -84,7 +99,7 @@ function WebApp() {
       })
       .catch((err) => {
         if (!alive) return;
-        setState({ phase: "error", message: String(err) });
+        setState({ phase: "error", message: errorMessage(err) });
       });
 
     return () => {
@@ -173,7 +188,7 @@ function ViewerShell() {
       })
       .catch((err: unknown) => {
         if (!alive) return;
-        setState({ phase: "error", message: String(err) });
+        setState({ phase: "error", message: errorMessage(err) });
       });
 
     return () => {
@@ -208,7 +223,7 @@ function ViewerShell() {
       }
       if (activeFolder === folder) setActiveFolder(null);
     } catch (err) {
-      setAddError(String(err));
+      setAddError(errorMessage(err));
     }
   };
 
@@ -223,7 +238,7 @@ function ViewerShell() {
       setProjects(updated);
       selectProject(folder);
     } catch (err) {
-      setAddError(String(err));
+      setAddError(errorMessage(err));
     }
   };
 

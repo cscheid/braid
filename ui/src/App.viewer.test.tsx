@@ -98,6 +98,32 @@ describe("braid-viewer project chooser", () => {
   });
 });
 
+describe("braid-viewer error display", () => {
+  it("renders the message of a structured command error, not [object Object]", async () => {
+    h.projects = ["/home/me/proj-one"];
+    // Backend errors serialize as { kind, message } (serde tag/content).
+    h.invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "list_projects_cmd") return ["/home/me/proj-one"];
+      if (cmd === "get_config_cmd") {
+        return Promise.reject({
+          kind: "Config",
+          message: "config error: missing doc_id",
+        });
+      }
+      return undefined;
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByText("proj-one"));
+
+    expect(
+      await screen.findByText(/config error: missing doc_id/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+  });
+});
+
 describe("braid-viewer project switching", () => {
   it("opens a project, then the header switcher returns to the chooser", async () => {
     h.projects = ["/home/me/proj-one"];
