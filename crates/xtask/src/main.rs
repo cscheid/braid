@@ -370,4 +370,22 @@ mod tests {
             "must list both fixes:\n{err}"
         );
     }
+
+    #[test]
+    fn tauri_conf_has_no_hardcoded_version() {
+        // braid-viewer's tauri.conf.json must omit `version` so Tauri
+        // inherits the workspace crate version; a hardcoded value drifts
+        // from the release tag. See
+        // claude-notes/plans/2026/06/18/viewer-release-design.md.
+        let conf = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../braid-viewer/tauri.conf.json");
+        let content = std::fs::read_to_string(&conf)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", conf.display()));
+        assert!(
+            !content.contains("\"version\""),
+            "tauri.conf.json must not hardcode a version (inherit the \
+             workspace crate version instead); found in {}",
+            conf.display()
+        );
+    }
 }
