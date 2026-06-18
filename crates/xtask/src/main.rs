@@ -21,6 +21,9 @@ commands:
   viewer-dev       run braid-viewer in Tauri dev mode (`cargo tauri dev`)
                    requires `cargo install tauri-cli --version '^2'`
   viewer-build     build the braid-viewer Tauri app bundle (`cargo tauri build`)
+  docs             build the documentation site (mdBook -> book/)
+                   requires `cargo install mdbook`
+  docs-serve       preview the docs site with live reload (`mdbook serve --open`)
   install-hooks    write a .git/hooks/pre-push that runs `cargo xtask ci`
                    (opt-in; skippable with `git push --no-verify`)";
 
@@ -47,6 +50,8 @@ fn main() {
         Some("test-ui") => test_ui(),
         Some("viewer-dev") => viewer_tauri("dev"),
         Some("viewer-build") => viewer_tauri("build"),
+        Some("docs") => mdbook("build", &[]),
+        Some("docs-serve") => mdbook("serve", &["--open"]),
         Some("install-hooks") => install_hooks(),
         Some(other) => {
             eprintln!("xtask: unknown command {other:?}\n{USAGE}");
@@ -230,6 +235,38 @@ fn viewer_tauri(subcommand: &str) -> i32 {
                 "xtask: is tauri-cli installed? \
                  (cargo install tauri-cli --version '^2')"
             );
+            1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// docs / docs-serve
+// ---------------------------------------------------------------------------
+
+/// Run `mdbook <subcommand> [extra...]` from the repo root, where `book.toml`
+/// lives (the book is built from `docs/`). Used by `docs` (build) and
+/// `docs-serve` (live preview).
+fn mdbook(subcommand: &str, extra: &[&str]) -> i32 {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
+    let root = match PathBuf::from(&manifest).join("../..").canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("xtask: cannot find repo root: {e}");
+            return 1;
+        }
+    };
+    let pretty = format!("mdbook {subcommand} {}", extra.join(" "));
+    eprintln!("xtask: {} (in {})", pretty.trim_end(), root.display());
+    match Command::new("mdbook").arg(subcommand).args(extra).current_dir(&root).status() {
+        Ok(st) if st.success() => 0,
+        Ok(st) => {
+            eprintln!("xtask: FAILED ({st}): {}", pretty.trim_end());
+            1
+        }
+        Err(e) => {
+            eprintln!("xtask: cannot run mdbook: {e}");
+            eprintln!("xtask: is mdBook installed? (cargo install mdbook)");
             1
         }
     }
