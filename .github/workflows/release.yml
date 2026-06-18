@@ -321,7 +321,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [preflight, build]
+    needs: [preflight, build, viewer]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -353,6 +353,18 @@ jobs:
               [ -f "$f" ] || MISSING+=("$f")
             done
           done
+          # braid-viewer GUI bundles (unsigned; integrity-only checksums).
+          # Tauri default names — arch tokens differ per format by design.
+          for f in \
+            "braid-viewer_${VERSION}_aarch64.dmg" \
+            "braid-viewer_${VERSION}_x64.dmg" \
+            "braid-viewer_${VERSION}_x64-setup.exe" \
+            "braid-viewer_${VERSION}_amd64.AppImage" \
+            "braid-viewer_${VERSION}_amd64.deb" \
+            "braid-viewer_${VERSION}_aarch64.AppImage" \
+            "braid-viewer_${VERSION}_arm64.deb"; do
+            [ -f "$f" ] || MISSING+=("$f")
+          done
           if [ ${#MISSING[@]} -gt 0 ]; then
             echo "::error::missing release files: ${MISSING[*]}"
             exit 1
@@ -360,6 +372,9 @@ jobs:
           cat -- *.sha256 | sort -k2 > checksums.sha256
           sha256sum -c checksums.sha256
           cat checksums.sha256
+          sha256sum braid-viewer_* > SHA256SUMS-viewer
+          sha256sum -c SHA256SUMS-viewer
+          cat SHA256SUMS-viewer
 
       - name: Generate release notes
         env:
@@ -424,4 +439,5 @@ jobs:
             artifacts/braid-*.tar.gz artifacts/braid-*.tar.gz.sha256 \
             artifacts/braid-*.tar.gz.minisig \
             artifacts/braid-*.zip artifacts/braid-*.zip.sha256 \
+            artifacts/braid-viewer_* artifacts/SHA256SUMS-viewer \
             artifacts/checksums.sha256
