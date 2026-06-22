@@ -1,6 +1,6 @@
 [package]
 name = "braid"
-description = "braid: an automerge-centric issue tracker for LLM agents"
+description = "braid: a local-first issue tracker for LLM agents"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

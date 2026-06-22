@@ -2,3 +2,4 @@ external-sources
 examples
 /target
 .braid.toml
+/book

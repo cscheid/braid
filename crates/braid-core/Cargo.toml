@@ -1,6 +1,6 @@
 [package]
 name = "braid-core"
-description = "Schema, hydrate/reconcile, and domain logic for braid, an automerge-centric issue tracker"
+description = "Schema, hydrate/reconcile, and domain logic for braid, a local-first issue tracker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

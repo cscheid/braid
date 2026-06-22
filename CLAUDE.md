@@ -1,4 +1,4 @@
-# an automerge-centric issue tracker for LLM agents
+# a local-first issue tracker for LLM agents
 
 ## Terminology
 

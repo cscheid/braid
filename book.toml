@@ -1,0 +1,19 @@
+# mdBook configuration for the braid documentation site.
+# The book is built from the existing `docs/` directory (so docs/mcp.md,
+# docs/schemas/, etc. keep the paths their contract tests depend on) and
+# published to GitHub Pages by .github/workflows/docs.yml. `docs/SUMMARY.md`
+# is the table of contents; `cargo xtask docs` / `docs-serve` build it.
+[book]
+title = "braid"
+description = "A local-first issue tracker for LLM agents"
+src = "docs"
+language = "en"
+
+[output.html]
+git-repository-url = "https://github.com/cscheid/braid"
+edit-url-template = "https://github.com/cscheid/braid/edit/main/{path}"
+default-theme = "rust"
+preferred-dark-theme = "coal"
+
+[output.html.fold]
+enable = true
