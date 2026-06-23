@@ -20,7 +20,9 @@ commands:
   test-ui          run the React UI unit tests (vitest) in ui/
   viewer-dev       run braid-viewer in Tauri dev mode (`cargo tauri dev`)
                    requires `cargo install tauri-cli --version '^2'`
-  viewer-build     build the braid-viewer Tauri app bundle (`cargo tauri build`)
+  viewer-build     build the braid-viewer Tauri app bundle (`cargo tauri build`);
+                   args after `--` pass through, e.g.
+                   `cargo xtask viewer-build -- --target <triple> --bundles dmg`
   docs             build the documentation site (mdBook -> book/)
                    requires `cargo install mdbook`
   docs-serve       preview the docs site with live reload (`mdbook serve --open`)
@@ -48,8 +50,8 @@ fn main() {
         Some("fmt") => run_steps(&[&["cargo", "fmt", "--all"]]),
         Some("build-ui") => build_ui(),
         Some("test-ui") => test_ui(),
-        Some("viewer-dev") => viewer_tauri("dev"),
-        Some("viewer-build") => viewer_tauri("build"),
+        Some("viewer-dev") => viewer_tauri("dev", &args[1..]),
+        Some("viewer-build") => viewer_tauri("build", &args[1..]),
         Some("docs") => mdbook("build", &[]),
         Some("docs-serve") => mdbook("serve", &["--open"]),
         Some("install-hooks") => install_hooks(),
@@ -196,8 +198,22 @@ fn viewer_preflight(has_tauri_cli: bool, has_node_modules: bool) -> Result<(), S
     }
 }
 
+/// Build the argv for `cargo tauri <subcommand>`, appending caller
+/// passthrough args. A single leading `--` separator (as inserted by
+/// `cargo xtask viewer-build -- …`) is dropped so it never reaches
+/// `cargo tauri`.
+fn tauri_argv(subcommand: &str, extra: &[String]) -> Vec<String> {
+    let mut argv = vec!["tauri".to_string(), subcommand.to_string()];
+    let extra = match extra.split_first() {
+        Some((first, rest)) if first == "--" => rest,
+        _ => extra,
+    };
+    argv.extend(extra.iter().cloned());
+    argv
+}
+
 /// Run `cargo tauri <subcommand>` inside `crates/braid-viewer/`.
-fn viewer_tauri(subcommand: &str) -> i32 {
+fn viewer_tauri(subcommand: &str, extra: &[String]) -> i32 {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
     let root = PathBuf::from(&manifest).join("../..");
     let viewer_dir = match root.join("crates/braid-viewer").canonicalize() {
@@ -222,15 +238,16 @@ fn viewer_tauri(subcommand: &str) -> i32 {
         return 1;
     }
 
-    eprintln!("xtask: cargo tauri {subcommand} in {}", viewer_dir.display());
-    match Command::new("cargo").args(["tauri", subcommand]).current_dir(&viewer_dir).status() {
+    let argv = tauri_argv(subcommand, extra);
+    eprintln!("xtask: cargo {} in {}", argv.join(" "), viewer_dir.display());
+    match Command::new("cargo").args(&argv).current_dir(&viewer_dir).status() {
         Ok(st) if st.success() => 0,
         Ok(st) => {
-            eprintln!("xtask: FAILED ({st}): cargo tauri {subcommand}");
+            eprintln!("xtask: FAILED ({st}): cargo {}", argv.join(" "));
             1
         }
         Err(e) => {
-            eprintln!("xtask: cannot run cargo tauri {subcommand}: {e}");
+            eprintln!("xtask: cannot run cargo {}: {e}", argv.join(" "));
             eprintln!(
                 "xtask: is tauri-cli installed? \
                  (cargo install tauri-cli --version '^2')"
@@ -341,7 +358,34 @@ fn install_hooks() -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use super::tauri_argv;
     use super::viewer_preflight;
+
+    fn as_strs(v: &[String]) -> Vec<&str> {
+        v.iter().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn tauri_argv_bare_subcommand() {
+        assert_eq!(as_strs(&tauri_argv("build", &[])), ["tauri", "build"]);
+    }
+
+    #[test]
+    fn tauri_argv_appends_passthrough() {
+        let extra = vec!["--target".to_string(), "aarch64-apple-darwin".to_string()];
+        assert_eq!(
+            as_strs(&tauri_argv("build", &extra)),
+            ["tauri", "build", "--target", "aarch64-apple-darwin"]
+        );
+    }
+
+    #[test]
+    fn tauri_argv_strips_leading_separator() {
+        // `cargo xtask viewer-build -- --bundles dmg` delivers a leading
+        // `--` in the passthrough; it must not reach `cargo tauri`.
+        let extra = vec!["--".to_string(), "--bundles".to_string(), "dmg".to_string()];
+        assert_eq!(as_strs(&tauri_argv("build", &extra)), ["tauri", "build", "--bundles", "dmg"]);
+    }
 
     #[test]
     fn preflight_ok_when_prerequisites_present() {
@@ -368,6 +412,24 @@ mod tests {
         assert!(
             err.contains("cargo install tauri-cli") && err.contains("npm install"),
             "must list both fixes:\n{err}"
+        );
+    }
+
+    #[test]
+    fn tauri_conf_has_no_hardcoded_version() {
+        // braid-viewer's tauri.conf.json must omit `version` so Tauri
+        // inherits the workspace crate version; a hardcoded value drifts
+        // from the release tag. See
+        // claude-notes/plans/2026/06/18/viewer-release-design.md.
+        let conf = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../braid-viewer/tauri.conf.json");
+        let content = std::fs::read_to_string(&conf)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", conf.display()));
+        assert!(
+            !content.contains("\"version\""),
+            "tauri.conf.json must not hardcode a version (inherit the \
+             workspace crate version instead); found in {}",
+            conf.display()
         );
     }
 }
