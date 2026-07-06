@@ -48,5 +48,5 @@ tokio-tungstenite = { version = "0.27", default-features = false }
 # default-features off to drop aws-lc-rs; ring is enabled instead (see
 # crates/braid/Cargo.toml for rationale).
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-
-
+webpki-roots = "1"
+rustls-native-certs = "0.8"
