@@ -12,6 +12,14 @@ it deliberately has none. Run a local automerge sync server (samod-based,
 for instance), point braid at it (`sync_server = "ws://localhost:8080"`),
 and let that server peer with the remote.
 
+`wss://` connections trust the compiled-in Mozilla (webpki) roots **plus**
+the system trust store, honoring the standard `SSL_CERT_FILE` /
+`SSL_CERT_DIR` variables. So braid works out of the box on a bare static
+binary *and* behind a TLS-terminating egress proxy (corporate MITM,
+sandbox) — point `SSL_CERT_FILE` at the proxy's CA bundle. Without the
+system store a proxy-issued certificate fails the dial with
+`UnknownIssuer`.
+
 The local cache lives under `~/.cache/braid/` (override with
 `BRAID_CACHE_DIR`), is keyed by SHA-256 of the doc id so the secret never
 appears on disk outside your config, is shared by all clones and

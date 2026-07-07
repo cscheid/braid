@@ -21,8 +21,10 @@ samod = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["signal"] }
 futures = { workspace = true }
 # "connect" + rustls for the dialer (src/ws.rs); "handshake" also covers
-# the accept side of the tests' in-process ws server. webpki roots are
-# compiled in so static binaries work without a system cert store.
+# the accept side of the tests' in-process ws server. "rustls-tls-webpki-roots"
+# is the feature that turns on tungstenite's rustls Connector plumbing; its
+# bundled default root store is unused because src/ws.rs passes its own
+# Connector built from webpki roots *plus* the platform/proxy CA store.
 tokio-tungstenite = { workspace = true, features = [
     "connect",
     "handshake",
@@ -32,6 +34,12 @@ tokio-tungstenite = { workspace = true, features = [
 # than the default aws-lc-rs) cross-compiles cleanly to musl and builds
 # everywhere without cmake.
 rustls = { workspace = true }
+# Compiled-in Mozilla roots: a static binary trusts public servers even in
+# a container with no system trust store.
+webpki-roots = { workspace = true }
+# Platform trust anchors, honoring SSL_CERT_FILE / SSL_CERT_DIR — how a
+# sandbox or corporate MITM-proxy CA bundle reaches braid.
+rustls-native-certs = { workspace = true }
 clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
