@@ -96,6 +96,7 @@ braid create "Fix the frobnicator" \
 | `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |
 | `braid ui` | open the skein in a local web UI; starts a minimal HTTP server on a random loopback port, serves the embedded React app, and opens the browser. The browser connects directly to the sync server — the local server only delivers the config. Press Ctrl-C to stop |
+| `braid serve (--data-dir DIR \| --in-memory) [--host H] [--port P]` | run a **loom**: a standalone sync server braid clients collaborate through when the default server is unreachable (or unwanted). Foreground process; prints `loom listening on ws://…` on stdout. Storage is an explicit choice: `--data-dir` persists skeins (doc ids hashed on disk), `--in-memory` forgets on exit. Defaults `127.0.0.1:3030`; binding `0.0.0.0` exposes the loom to the network — anyone who can reach it can store and fetch skeins. Point clients at it via `BRAID_SYNC_URL=ws://host:3030` or `sync_server` in `.braid.toml` |
 
 Conventions:
 
@@ -122,6 +123,12 @@ and exits. If the server is unreachable you get a stderr warning and work
 continues from the cache; the next successful command converges. Set
 `BRAID_AUTHOR` to attribute your changes (falls back to git `user.name`,
 then the OS username).
+
+The sync server can be any automerge-repo relay, including braid's own:
+`braid serve` runs a loom on localhost (or a shared machine) for when the
+configured server is down or the project wants a self-hosted one. Clients
+select it per-invocation with `BRAID_SYNC_URL=ws://host:3030` or durably
+via `sync_server` in `.braid.toml`.
 
 Concurrent edits merge automatically: edits to different fields both
 survive; concurrent edits to the same prose field interleave

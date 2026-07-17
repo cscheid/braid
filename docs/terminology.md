@@ -9,7 +9,7 @@ own name.
 | **braid** | the program: the CLI and its library crates. Never the data. |
 | **skein** | the collection of all issues tracked for a project. One skein = one automerge document; the doc id in `.braid.toml` identifies (and grants access to) a skein. Replaces the generic "tracker". |
 | **strand** | a single issue within a skein. "File a strand", "close a strand". |
-| **loom** | *reserved*: a sync-server peer — in particular a future samod-based local relay binary, where skeins are exchanged. Not yet built; don't use it for anything else. |
+| **loom** | a sync-server peer where skeins are exchanged — in particular the standalone samod-based relay `braid serve` runs. "Run a loom", "point braid at the loom". Don't use the word for anything else. |
 
 Why these words:
 

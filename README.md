@@ -58,6 +58,21 @@ is a public community relay that stores your document unencrypted — run your
 own sync server for real work. Full detail (and leak recovery via `braid
 rotate`): [the security note](https://cscheid.github.io/braid/security.html).
 
+## Run your own sync server
+
+braid ships one — a **loom**. Useful when the public relay is down, on
+isolated networks, or whenever a project's issues shouldn't transit a
+public server:
+
+```sh
+braid serve --data-dir ~/.local/share/braid/loom
+# elsewhere:
+BRAID_SYNC_URL=ws://that-machine:3030 braid list
+```
+
+Details (persistence, exposure beyond loopback, TLS, systemd):
+[how syncing works](https://cscheid.github.io/braid/syncing.html).
+
 ## Contributing
 
 The [development guide](https://cscheid.github.io/braid/development.html)
