@@ -168,8 +168,15 @@ already work today.
       the row now points at `braid serve`.
 - [x] ~~CHANGELOG entry~~ — dropped: this repo keeps no CHANGELOG file
       (the one spotted earlier belongs to vendored samod).
-- [ ] Close the strand with an outcome comment; file follow-up strands for
-      the out-of-scope list (at minimum `--peer` relaying).
+- [x] Close the strand with an outcome comment; file follow-up strands for
+      the out-of-scope list (`br-loom-peer-6dfeqoei` tracks `--peer`
+      relaying and lists the other v1 exclusions).
+
+## Outcome
+
+Shipped in commit `8c9d9fd` (2026-07-17): `braid serve`, 5 e2e tests,
+docs across agents-info/README/syncing/security/terminology.
+`cargo xtask ci` green. Strand `br-loom-3qm0ze53` closed.
 
 ## Decisions from Carlos (2026-07-17)
 
