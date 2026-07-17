@@ -8,7 +8,9 @@ read *and write* your skein, forever. Treat it like a credential:
 - the default sync server, `wss://sync.automerge.org`, is a **public
   community relay**: it stores your document unencrypted, and possession
   of the id is the only access control. Fine for experiments; for real
-  work, run your own sync server and set `sync_server` accordingly.
+  work, run your own sync server — braid ships one,
+  [`braid serve`](syncing.md#running-your-own-sync-server-braid-serve) —
+  and set `sync_server` accordingly.
 
 (The automerge ecosystem's capability-based access control + E2EE work —
 Keyhive/Beelay — will eventually improve this story upstream.)

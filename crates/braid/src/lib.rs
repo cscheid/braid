@@ -12,6 +12,7 @@ pub mod commands;
 pub mod import;
 pub mod mcp;
 pub mod ops;
+pub mod serve;
 pub mod skein;
 pub mod sync;
 pub mod ui;

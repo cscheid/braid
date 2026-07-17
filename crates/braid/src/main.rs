@@ -239,6 +239,27 @@ enum Cmd {
     },
     /// Open the skein in a local web UI (browser connects directly to the sync server)
     Ui,
+    /// Run a loom: a standalone sync server braid clients can collaborate through
+    #[command(group(
+        clap::ArgGroup::new("loom_storage").required(true).args(["data_dir", "in_memory"])
+    ))]
+    Serve {
+        /// Address to bind. Loopback by default; 0.0.0.0 exposes the loom
+        /// to your network — anyone who can reach it can store and fetch
+        /// skeins
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port to bind; 0 picks a free port (the bound URL is printed)
+        #[arg(long, default_value_t = 3030)]
+        port: u16,
+        /// Persist skeins under DIR (created if missing; doc ids are
+        /// hashed, so they never appear on disk)
+        #[arg(long, value_name = "DIR")]
+        data_dir: Option<std::path::PathBuf>,
+        /// Keep skeins in memory only; everything is forgotten on exit
+        #[arg(long)]
+        in_memory: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -403,6 +424,9 @@ async fn main() {
             braid::mcp::serve(braid::mcp::McpOpts { project, read_only, enable_destructive }).await
         }
         Cmd::Ui => braid::ui::serve(&cwd).await,
+        Cmd::Serve { host, port, data_dir, in_memory } => {
+            braid::serve::serve(braid::serve::ServeOpts { host, port, data_dir, in_memory }).await
+        }
     };
 
     if let Err(e) = result {
