@@ -38,9 +38,10 @@ The skein lives in an automerge document whose shape is one-to-one with
 these records, with three deliberate deltas:
 
 1. **Prose fields** (`description`, `design`, `acceptance_criteria`,
-   `notes`, comment `text`) are collaborative `Text` objects in the
-   document (concurrent edits interleave); in JSONL they are plain
-   strings.
+   `notes`, comment `text`) are scalar strings in the document, so concurrent
+   edits to one field are last-writer-wins. Skeins written before braid 0.8
+   may hold them as `Text` objects, which braid still reads; in JSONL they
+   are always plain strings.
 2. **`labels`** is a map-as-set in the document (key presence =
    membership); in JSONL it is a sorted, deduplicated array.
 3. The document has a top-level `metadata` object

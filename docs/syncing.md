@@ -80,6 +80,6 @@ worktrees, and is safe to delete at any time. `BRAID_NO_CACHE=1` runs
 fully stateless (requires the server).
 
 Merge semantics, briefly: edits to different fields of the same issue both
-survive; concurrent edits to the same prose field (description, design,
-notes, comments) interleave character-wise; same scalar field → last
-writer wins; deleting an issue wins over concurrent edits to it.
+survive; concurrent edits to the same field, prose included, are last
+writer wins (one side's whole value survives); concurrent new comments both
+survive; deleting an issue wins over concurrent edits to it.

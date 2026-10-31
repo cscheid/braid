@@ -82,7 +82,7 @@
     },
     "prose": {
       "type": "string",
-      "description": "Markdown by convention. Stored as collaborative Text in the automerge document; plain string here."
+      "description": "Markdown by convention. A plain string here and, since braid 0.8, in the automerge document (older skeins may hold Text)."
     },
     "timestamp": {
       "type": "string",

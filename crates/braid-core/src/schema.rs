@@ -1,14 +1,14 @@
 //! The braid skein document schema, in hydrated (plain Rust) form.
 //!
 //! These types mirror the automerge document shape one-to-one (see the
-//! design doc's "Document schema" section). Prose fields that are automerge
-//! `Text` in the document are plain `String`s here; conversion happens in
+//! design doc's "Document schema" section). Conversion happens in
 //! [`crate::amdoc`].
 //!
 //! Merge-semantics summary:
 //! - scalar fields: last-writer-wins
 //! - prose fields (`description`, `design`, `acceptance_criteria`, `notes`,
-//!   comment `text`): automerge `Text`, concurrent edits interleave
+//!   comment `text`): scalar strings, last-writer-wins (older skeins may hold
+//!   automerge `Text`, which is still read)
 //! - `labels`, `dependencies`, `comments`, and the top-level `issues`
 //!   collection: maps keyed by collision-free ids, so concurrent inserts of
 //!   distinct keys both survive and concurrent inserts of the same logical

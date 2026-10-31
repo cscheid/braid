@@ -115,7 +115,7 @@ export function StrandDetail({ issue, changeDoc, onClose, inline = false }: Prop
       const r = d.issues[issue.id] as unknown as IssueRecord|undefined;
       if (!r) return;
       const comments = (r.comments ??= {}) as IssueRecord;
-      comments[cid] = { id: s(cid), author: s("ui"), created_at: s(ts()), text };
+      comments[cid] = { id: s(cid), author: s("ui"), created_at: s(ts()), text: s(text) };
       r.updated_at = s(ts());
     });
     setCommentDraft("");
@@ -224,7 +224,7 @@ export function StrandDetail({ issue, changeDoc, onClose, inline = false }: Prop
             <div className="section-label">Description</div>
             <EditableText multiline
               value={issue.description ?? ""}
-              onChange={v => update(r => { if (v) r.description = v; else delete r.description; })}
+              onChange={v => update(r => { if (v) r.description = s(v); else delete r.description; })}
               placeholder="Add a description…"
             />
           </div>
@@ -235,7 +235,7 @@ export function StrandDetail({ issue, changeDoc, onClose, inline = false }: Prop
               <div className="section-label">Acceptance criteria</div>
               <EditableText multiline
                 value={issue.acceptance_criteria ?? ""}
-                onChange={v => update(r => { if (v) r.acceptance_criteria = v; else delete r.acceptance_criteria; })}
+                onChange={v => update(r => { if (v) r.acceptance_criteria = s(v); else delete r.acceptance_criteria; })}
                 placeholder="Add acceptance criteria…"
               />
             </div>
@@ -247,7 +247,7 @@ export function StrandDetail({ issue, changeDoc, onClose, inline = false }: Prop
               <div className="section-label">Notes</div>
               <EditableText multiline
                 value={issue.notes}
-                onChange={v => update(r => { if (v) r.notes = v; else delete r.notes; })}
+                onChange={v => update(r => { if (v) r.notes = s(v); else delete r.notes; })}
                 placeholder="Add notes…"
               />
             </div>

@@ -28,7 +28,7 @@ export interface RawComment {
   id: string;
   author: string;
   created_at: string;
-  text: string; // automerge Text, accessed as string via proxy
+  text: string; // RawString scalar; legacy skeins may hold automerge Text
 }
 
 // Raw issue as it lives in the automerge document

@@ -8,6 +8,11 @@ clear error and run `braid rotate --adopt` to follow; changes they made
 after the cutover are detected and written to `.braid-stragglers.jsonl`
 for review and re-import.
 
+Rotation is also how a skein created before braid 0.8 gets the speedup from
+scalar prose. Those skeins store prose as `Text`, at one operation per
+character, and that history stays in the document until a rotation leaves it
+behind. braid works on them unchanged, just more slowly.
+
 If the doc id has **leaked**, use `braid rotate --revoke`: identical
 mechanics, except no forwarding pointer is written into the old document
 (the attacker can read it — a pointer would hand them the new

@@ -5,7 +5,7 @@
 //! merges in both directions, and asserts (a) convergence and (b) the
 //! specific semantics the design doc promises:
 //!
-//! - prose (Text) fields: concurrent edits interleave (D5)
+//! - prose fields: last writer wins, one side whole (supersedes D5)
 //! - scalar fields: last-writer-wins, one side's value atomically (D5)
 //! - same logical dependency edge added twice: converges to one entry (D7)
 //! - distinct issues / labels / comments added concurrently: both survive
@@ -88,25 +88,26 @@ fn converge(alice: &mut Automerge, bob: &mut Automerge) -> Skein {
 }
 
 #[test]
-fn concurrent_text_edits_to_same_description_interleave() {
+fn concurrent_prose_edits_are_lww_one_side_wins_whole() {
     let mut base = issue("br-x");
     base.description = Some("The quick brown fox jumps over the lazy dog.".into());
     let (mut alice, mut bob) = base_and_forks(vec![base.clone()]);
 
-    // Alice edits the start; Bob edits the end. Disjoint regions.
+    let alice_text = "The slow brown fox jumps over the lazy dog.";
     let mut a = base.clone();
-    a.description = Some("The slow brown fox jumps over the lazy dog.".into());
+    a.description = Some(alice_text.into());
     apply(&mut alice, &a);
 
+    let bob_text = "The quick brown fox jumps over the energetic dog.";
     let mut b = base.clone();
-    b.description = Some("The quick brown fox jumps over the energetic dog.".into());
+    b.description = Some(bob_text.into());
     apply(&mut bob, &b);
 
     let merged = converge(&mut alice, &mut bob);
-    assert_eq!(
-        merged.issues["br-x"].description.as_deref(),
-        Some("The slow brown fox jumps over the energetic dog."),
-        "both edits must survive the merge (Text interleaving, design D5)"
+    let got = merged.issues["br-x"].description.as_deref().unwrap();
+    assert!(
+        got == alice_text || got == bob_text,
+        "prose must never interleave: one writer wins whole, got {got:?}"
     );
 }
 

@@ -131,8 +131,9 @@ select it per-invocation with `BRAID_SYNC_URL=ws://host:3030` or durably
 via `sync_server` in `.braid.toml`.
 
 Concurrent edits merge automatically: edits to different fields both
-survive; concurrent edits to the same prose field interleave
-character-wise; same scalar field, last writer wins; deleting a strand
+survive; concurrent edits to the same field, prose included, are last
+writer wins (one side's whole value survives); concurrent new comments both
+survive; deleting a strand
 wins over concurrent edits to it.
 
 If a command fails with "this skein was rotated": the project moved to a

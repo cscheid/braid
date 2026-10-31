@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use automerge::{Automerge, ReadDoc};
+use automerge::{Automerge, ReadDoc, transaction::Transactable};
 use braid_core::amdoc::{delete_issue, hydrate, init_skein, reconcile_issue, reconcile_skein};
 use braid_core::schema::*;
 
@@ -218,30 +218,108 @@ fn reconcile_is_idempotent() {
     assert_eq!(doc.get_heads(), heads_before, "idempotent reconcile must not create a change");
 }
 
-#[test]
-fn text_field_is_updated_in_place_not_replaced() {
-    let mut issue = full_issue("br-full01");
-    let skein = skein_with(vec![issue.clone()]);
-    let mut doc = materialize(&skein);
+/// The automerge value stored at `issues.<id>.<key>`.
+fn issue_value<'a>(doc: &'a Automerge, id: &str, key: &str) -> automerge::Value<'a> {
+    let issues_obj = doc.get(automerge::ROOT, "issues").unwrap().unwrap().1;
+    let issue_obj = doc.get(&issues_obj, id).unwrap().unwrap().1;
+    doc.get(&issue_obj, key).unwrap().unwrap().0
+}
 
-    // Locate the automerge Text object backing `description`.
+/// A document where `description` is legacy automerge `Text`, as written by
+/// braid before prose became scalar.
+fn doc_with_legacy_description(issue: &Issue, text: &str) -> Automerge {
+    let mut doc = materialize(&skein_with(vec![issue.clone()]));
+    doc.transact(|tx| {
+        let issues_obj = tx.get(automerge::ROOT, "issues")?.unwrap().1;
+        let issue_obj = tx.get(&issues_obj, issue.id.as_str())?.unwrap().1;
+        let id = tx.put_object(&issue_obj, "description", automerge::ObjType::Text)?;
+        tx.splice_text(&id, 0, 0, text)
+    })
+    .map_err(|f| f.error)
+    .unwrap();
+    doc
+}
+
+fn assert_scalar_str(value: &automerge::Value<'_>, want: &str) {
+    match value {
+        automerge::Value::Scalar(s) => {
+            assert_eq!(s.as_str(), Some(want), "wrong scalar value")
+        }
+        other => panic!("prose must be a scalar string, found {other:?}"),
+    }
+}
+
+#[test]
+fn prose_fields_are_stored_as_scalars() {
+    let issue = full_issue("br-full01");
+    let doc = materialize(&skein_with(vec![issue.clone()]));
+
+    for (key, want) in [
+        ("description", &issue.description),
+        ("design", &issue.design),
+        ("acceptance_criteria", &issue.acceptance_criteria),
+        ("notes", &issue.notes),
+    ] {
+        assert_scalar_str(&issue_value(&doc, "br-full01", key), want.as_deref().unwrap());
+    }
+
+    let comment = issue.comments.values().next().unwrap();
     let issues_obj = doc.get(automerge::ROOT, "issues").unwrap().unwrap().1;
     let issue_obj = doc.get(&issues_obj, "br-full01").unwrap().unwrap().1;
-    let desc_obj_before = doc.get(&issue_obj, "description").unwrap().unwrap().1;
+    let comments = doc.get(&issue_obj, "comments").unwrap().unwrap().1;
+    let comment_obj = doc.get(&comments, comment.id.as_str()).unwrap().unwrap().1;
+    assert_scalar_str(&doc.get(&comment_obj, "text").unwrap().unwrap().0, &comment.text);
+}
 
-    // Mutate the description and reconcile.
-    issue.description = Some("A description.\n\nWith paragraphs, edits, and `code`.".into());
+#[test]
+fn prose_op_count_does_not_scale_with_length() {
+    let mut issue = minimal_issue("br-min001");
+    let short = materialize(&skein_with(vec![issue.clone()])).stats().num_ops;
+    issue.description = Some("x".repeat(100_000));
+    let long = materialize(&skein_with(vec![issue])).stats().num_ops;
+    assert!(long - short <= 1, "100k characters must cost one op, cost {}", long - short);
+}
+
+#[test]
+fn editing_scalar_prose_replaces_the_value() {
+    let mut issue = full_issue("br-full01");
+    let mut doc = materialize(&skein_with(vec![issue.clone()]));
+
+    issue.description = Some("rewritten".into());
     doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
 
-    let desc_obj_after = doc.get(&issue_obj, "description").unwrap().unwrap().1;
+    assert_scalar_str(&issue_value(&doc, "br-full01", "description"), "rewritten");
+}
+
+#[test]
+fn unchanged_legacy_text_is_left_alone() {
+    let mut issue = minimal_issue("br-min001");
+    let mut doc = doc_with_legacy_description(&issue, "old prose");
+    issue.description = Some("old prose".into());
+    let heads_before = doc.get_heads();
+
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
+
+    assert_eq!(doc.get_heads(), heads_before, "matching legacy Text must not generate a change");
+    assert!(matches!(
+        issue_value(&doc, "br-min001", "description"),
+        automerge::Value::Object(automerge::ObjType::Text)
+    ));
     assert_eq!(
-        desc_obj_before, desc_obj_after,
-        "description must be spliced in place, not deleted and recreated"
+        hydrate(&doc).unwrap().issues["br-min001"].description.as_deref(),
+        Some("old prose")
     );
-    assert_eq!(
-        doc.text(&desc_obj_after).unwrap(),
-        "A description.\n\nWith paragraphs, edits, and `code`."
-    );
+}
+
+#[test]
+fn editing_legacy_text_converts_it_to_a_scalar() {
+    let mut issue = minimal_issue("br-min001");
+    let mut doc = doc_with_legacy_description(&issue, "old prose");
+
+    issue.description = Some("new prose".into());
+    doc.transact(|tx| reconcile_issue(tx, &issue)).map_err(|f| f.error).unwrap();
+
+    assert_scalar_str(&issue_value(&doc, "br-min001", "description"), "new prose");
 }
 
 #[test]

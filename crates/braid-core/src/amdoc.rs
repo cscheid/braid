@@ -5,9 +5,7 @@
 //! - **hydrate**: read an automerge document into a [`Skein`].
 //! - **reconcile**: given desired hydrated state, mutate the document to
 //!   match — touching *only* what differs, so unchanged fields generate no
-//!   operations (keeps merges clean) and prose fields are updated via
-//!   `update_text` (diff-and-splice, so concurrent edits interleave instead
-//!   of clobbering).
+//!   operations (keeps merges clean).
 //!
 //! All functions are generic over automerge's `ReadDoc` / `Transactable`
 //! traits so they work both on a bare `Automerge` and inside a samod
@@ -16,8 +14,8 @@
 //! Shape conventions (see the design doc's "Document schema" section):
 //! - `ROOT.metadata`: map of scalars
 //! - `ROOT.issues`: map keyed by issue id → issue map
-//! - prose fields are automerge `Text` (hydration also tolerates plain
-//!   string scalars written by foreign tools)
+//! - prose fields are scalar strings (hydration also reads automerge `Text`,
+//!   which skeins written before 0.8 contain)
 //! - `labels` is a map-as-set (key presence = membership)
 //! - `dependencies` / `comments` are maps keyed by edge key / comment id
 //!
@@ -134,29 +132,31 @@ fn put_int_if_changed<T: Transactable>(
     Ok(())
 }
 
-/// Reconcile a prose field stored as automerge `Text`.
+/// Reconcile a prose field, stored as a scalar string (last writer wins).
 ///
-/// - present + desired: `update_text` only if different (diff-and-splice)
-/// - missing/wrong-type + desired: fresh `Text` object
-/// - present + not desired: delete the key
-fn reconcile_text<T: Transactable>(
+/// Skeins written before 0.8 hold prose as automerge `Text`, which costs one
+/// op per character. Matching `Text` is left alone so that reconciling an
+/// unchanged field generates no operations; an edit replaces it with a scalar.
+/// Only a fresh document (`braid rotate`) sheds the `Text` history.
+fn reconcile_prose<T: Transactable>(
     tx: &mut T,
     obj: &ObjId,
     key: &str,
     desired: Option<&str>,
 ) -> Result<(), automerge::AutomergeError> {
-    match (tx.get(obj, key)?, desired) {
-        (Some((Value::Object(ObjType::Text), id)), Some(want)) => {
-            if tx.text(&id)? != want {
-                tx.update_text(&id, want)?;
-            }
+    let Some(want) = desired else {
+        if tx.get(obj, key)?.is_some() {
+            tx.delete(obj, key)?;
         }
-        (_, Some(want)) => {
-            let id = tx.put_object(obj, key, ObjType::Text)?;
-            tx.splice_text(&id, 0, 0, want)?;
-        }
-        (Some(_), None) => tx.delete(obj, key)?,
-        (None, None) => {}
+        return Ok(());
+    };
+    let unchanged = match tx.get(obj, key)? {
+        Some((Value::Object(ObjType::Text), id)) => tx.text(&id)? == want,
+        Some((Value::Scalar(s), _)) => s.as_str() == Some(want),
+        _ => false,
+    };
+    if !unchanged {
+        tx.put(obj, key, want)?;
     }
     Ok(())
 }
@@ -199,10 +199,10 @@ pub fn reconcile_issue<T: Transactable>(tx: &mut T, issue: &Issue) -> Result<(),
     put_opt_str_if_changed(tx, &obj, "defer_until", issue.defer_until.as_deref())?;
     put_opt_str_if_changed(tx, &obj, "external_ref", issue.external_ref.as_deref())?;
 
-    reconcile_text(tx, &obj, "description", issue.description.as_deref())?;
-    reconcile_text(tx, &obj, "design", issue.design.as_deref())?;
-    reconcile_text(tx, &obj, "acceptance_criteria", issue.acceptance_criteria.as_deref())?;
-    reconcile_text(tx, &obj, "notes", issue.notes.as_deref())?;
+    reconcile_prose(tx, &obj, "description", issue.description.as_deref())?;
+    reconcile_prose(tx, &obj, "design", issue.design.as_deref())?;
+    reconcile_prose(tx, &obj, "acceptance_criteria", issue.acceptance_criteria.as_deref())?;
+    reconcile_prose(tx, &obj, "notes", issue.notes.as_deref())?;
 
     // labels: map-as-set
     let labels_obj = ensure_obj(tx, &obj, "labels", ObjType::Map)?;
@@ -265,7 +265,7 @@ pub fn reconcile_issue<T: Transactable>(tx: &mut T, issue: &Issue) -> Result<(),
         put_str_if_changed(tx, &cobj, "id", &comment.id)?;
         put_str_if_changed(tx, &cobj, "author", &comment.author)?;
         put_str_if_changed(tx, &cobj, "created_at", &comment.created_at)?;
-        reconcile_text(tx, &cobj, "text", Some(&comment.text))?;
+        reconcile_prose(tx, &cobj, "text", Some(&comment.text))?;
     }
 
     Ok(())
@@ -371,8 +371,8 @@ fn req_int<R: ReadDoc>(doc: &R, obj: &ObjId, key: &str, path: &str) -> Result<i6
     }
 }
 
-/// A prose field: automerge `Text` preferred, plain string scalar tolerated
-/// (a foreign writer may have written one).
+/// A prose field: a scalar string, or automerge `Text` in skeins written
+/// before 0.8.
 fn opt_text<R: ReadDoc>(
     doc: &R,
     obj: &ObjId,
