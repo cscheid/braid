@@ -245,7 +245,7 @@ async fn adopt_detects_stragglers() {
 /// A clone whose doc id comes from `~/.config/braid/projects.toml`, selected
 /// by a `.braid-project` marker. Returns the path of the config file.
 fn use_user_config(clone: &Clone_, doc_id: &str, server_url: &str) -> PathBuf {
-    let dir = clone.home.join(".config/braid");
+    let dir = clone.home.join(".config").join("braid");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("projects.toml");
     std::fs::write(
@@ -339,7 +339,8 @@ async fn adopt_with_user_config_reports_an_unreachable_successor() {
     use_user_config(&c, &old_id, &server.url);
     c.braid().args(["rotate", "--adopt"]).assert().success();
     let hash = braid::cache::hash_component(&new_id);
-    let successor = c.home.join(".cache/braid/store").join(&hash[..2]).join(&hash[2..]);
+    let successor =
+        c.home.join(".cache").join("braid").join("store").join(&hash[..2]).join(&hash[2..]);
     assert!(successor.is_dir(), "expected the successor at {}", successor.display());
     std::fs::remove_dir_all(&successor).unwrap();
 
