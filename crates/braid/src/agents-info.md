@@ -91,7 +91,7 @@ braid create "Fix the frobnicator" \
 | `braid secret` | print the full doc id + sync server (paste-ready TOML). **Grants read/write access** — only run when a human asks |
 | `braid rotate` | move the skein to a fresh document (sheds history); stale clones are told to `--adopt`. **Only run when a human asks** |
 | `braid rotate --revoke` | rotation for a *leaked* doc id: no forwarding pointer is written; the new secret must be distributed out-of-band. **Only run when a human asks** |
-| `braid rotate --adopt` | follow a rotation: switch this clone to the successor skein (stragglers written to `.braid-stragglers.jsonl` for review) |
+| `braid rotate --adopt` | follow a rotation: switch this clone to the successor skein (stragglers written to `.braid-stragglers.jsonl` for review). If the doc id comes from `projects.toml` or the environment, it prints the new id for a human to put in place |
 | `braid import <file>` | import strands from JSONL (beads or braid format); beads tombstones (soft-deleted records) are recognized and skipped, reported as `(skipped N tombstones)` |
 | `braid export` | all strands as JSONL on stdout (backup / grep surface; records conform to the published JSON Schema — see `docs/schemas/` in the braid repo) |
 | `braid init [--name N] [--join ID] [--sync-server URL] [--print-only]` | create or adopt a skein |

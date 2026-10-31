@@ -17,7 +17,7 @@ use samod::DocumentId;
 
 use crate::config::{DEFAULT_SYNC_SERVER, REPO_FILE_NAME, Source};
 use crate::ops::{self, Session};
-use crate::skein::{PushOutcome, open_repo, open_skein, open_skein_unchecked};
+use crate::skein::{OpenedSkein, PushOutcome, open_repo, open_skein, open_skein_unchecked};
 use crate::sync::{Connect, connect, sync_timeout};
 
 // ---------------------------------------------------------------------------
@@ -336,6 +336,33 @@ pub async fn rotate(cwd: &Path, revoke: bool) -> Result<()> {
 /// Follow a compact rotation's forwarding pointer: switch this clone's
 /// configuration to the successor document, surfacing any "straggler"
 /// strands that were written to the old skein after the rotation.
+/// Load the successor named by a rotation through an already-open skein's
+/// connection, returning its strand count.
+async fn verify_successor(opened: &OpenedSkein, new_doc_id: &str) -> Result<usize> {
+    let redacted = crate::docid::DocId::new(new_doc_id.to_string()).redacted();
+    let unavailable = |why: &str| {
+        anyhow!(
+            "could not load the successor skein {redacted} ({why}). The doc id \
+             above is still correct: put it in place, then run `braid sync` when \
+             the server is reachable."
+        )
+    };
+    let doc_id: DocumentId = new_doc_id
+        .parse()
+        .map_err(|_| unavailable("the rotation record holds an invalid document id"))?;
+    let doc = opened
+        .repo
+        .find(doc_id)
+        .await
+        .map_err(|_| anyhow!("samod repo stopped unexpectedly"))?
+        .ok_or_else(|| unavailable("not in the local cache or on the sync server"))?;
+    if let Some(conn) = opened.conn {
+        let _ = tokio::time::timeout(sync_timeout(), doc.we_have_their_changes(conn)).await;
+    }
+    let skein = doc.with_document(|d| hydrate(d))?;
+    Ok(skein.issues.len())
+}
+
 pub async fn rotate_adopt(cwd: &Path) -> Result<()> {
     let opened = open_skein_unchecked(cwd).await?;
     let old_state = opened.doc.with_document(|d| hydrate(d))?;
@@ -383,6 +410,25 @@ pub async fn rotate_adopt(cwd: &Path) -> Result<()> {
     }
 
     switch_config_to(&opened.cfg.doc_id_source, &new_doc_id, &opened.cfg.sync_server)?;
+
+    // braid can't rewrite the user's config or environment, so reopening
+    // through them would just find the old skein again. Check the successor
+    // directly, and leave the config change to the user.
+    if !matches!(opened.cfg.doc_id_source, Source::RepoFile(_)) {
+        let verified = verify_successor(&opened, &new_doc_id).await;
+        opened.close().await;
+        let n = verified?;
+        println!(
+            "successor skein {} verified ({n} strand{})",
+            crate::docid::DocId::new(new_doc_id).redacted(),
+            if n == 1 { "" } else { "s" }
+        );
+        eprintln!(
+            "braid: this clone keeps reporting the rotation until the doc id above \
+             is in place."
+        );
+        return Ok(());
+    }
     opened.close().await;
 
     // Verify the successor loads with the new configuration.
