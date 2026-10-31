@@ -242,6 +242,123 @@ async fn adopt_detects_stragglers() {
     server.stop().await;
 }
 
+/// A clone whose doc id comes from `~/.config/braid/projects.toml`, selected
+/// by a `.braid-project` marker. Returns the path of the config file.
+fn use_user_config(clone: &Clone_, doc_id: &str, server_url: &str) -> PathBuf {
+    let dir = clone.home.join(".config/braid");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("projects.toml");
+    std::fs::write(
+        &path,
+        format!("[projects.demo]\ndoc_id = \"{doc_id}\"\nsync_server = \"{server_url}\"\n"),
+    )
+    .unwrap();
+    std::fs::write(clone.work.join(".braid-project"), "demo\n").unwrap();
+    path
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn adopt_with_user_config_succeeds_and_says_what_to_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start().await;
+
+    let a = Clone_::new(tmp.path(), "a");
+    a.braid().args(["init", "--name", "user", "--sync-server", &server.url]).assert().success();
+    let old_id = a.doc_id();
+    a.create("carried strand");
+
+    let c = Clone_::new(tmp.path(), "c");
+    let cfg = use_user_config(&c, &old_id, &server.url);
+    assert_eq!(c.list_titles().len(), 1);
+
+    a.braid().arg("rotate").assert().success();
+    let new_id = a.doc_id();
+
+    let out = c.braid().args(["rotate", "--adopt"]).assert().success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stdout.contains(&format!("doc_id = \"{new_id}\"")), "new id on stdout:\n{stdout}");
+    assert!(stdout.contains("1 strand"), "reports the verified successor:\n{stdout}");
+    assert!(stderr.contains(&cfg.display().to_string()), "names the file to edit:\n{stderr}");
+    assert!(stderr.contains("[projects.demo]"), "names the section to edit:\n{stderr}");
+    assert!(!stderr.contains("error:"), "adopting must not report an error:\n{stderr}");
+
+    // braid cannot rewrite the file, and until it changes the clone is refused.
+    assert!(std::fs::read_to_string(&cfg).unwrap().contains(&old_id));
+    c.braid().args(["list"]).assert().failure().stderr(predicate::str::contains("rotated"));
+
+    // Following the instructions finishes the job.
+    use_user_config(&c, &new_id, &server.url);
+    assert_eq!(c.list_titles(), ["carried strand"]);
+
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn adopt_with_env_doc_id_succeeds_and_prints_the_new_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start().await;
+
+    let a = Clone_::new(tmp.path(), "a");
+    a.braid().args(["init", "--name", "env", "--sync-server", &server.url]).assert().success();
+    let old_id = a.doc_id();
+    a.create("carried strand");
+    a.braid().arg("rotate").assert().success();
+    let new_id = a.doc_id();
+
+    let c = Clone_::new(tmp.path(), "c");
+    let out = c
+        .braid()
+        .env("BRAID_DOC_ID", &old_id)
+        .env("BRAID_SYNC_URL", &server.url)
+        .args(["rotate", "--adopt"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stdout.contains(&format!("doc_id = \"{new_id}\"")), "new id on stdout:\n{stdout}");
+    assert!(stderr.contains("BRAID_DOC_ID"), "names the variable to change:\n{stderr}");
+
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn adopt_with_user_config_reports_an_unreachable_successor() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = TestServer::start().await;
+
+    let a = Clone_::new(tmp.path(), "a");
+    a.braid().args(["init", "--name", "gone", "--sync-server", &server.url]).assert().success();
+    let old_id = a.doc_id();
+    a.braid().arg("rotate").assert().success();
+    let new_id = a.doc_id();
+
+    // C has the rotation marker cached, but not the successor, and is offline:
+    // adopt once online to cache both, then remove the successor.
+    let c = Clone_::new(tmp.path(), "c");
+    use_user_config(&c, &old_id, &server.url);
+    c.braid().args(["rotate", "--adopt"]).assert().success();
+    let hash = braid::cache::hash_component(&new_id);
+    let successor = c.home.join(".cache/braid/store").join(&hash[..2]).join(&hash[2..]);
+    assert!(successor.is_dir(), "expected the successor at {}", successor.display());
+    std::fs::remove_dir_all(&successor).unwrap();
+
+    let out = c
+        .braid()
+        .env("BRAID_SYNC_URL", DEAD_SERVER)
+        .env("BRAID_SYNC_TIMEOUT", "0.2")
+        .args(["rotate", "--adopt"])
+        .assert()
+        .failure();
+    let stdout = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stdout.contains(&new_id), "the id is still worth printing:\n{stdout}");
+    assert!(stderr.contains("could not load"), "says what failed:\n{stderr}");
+    assert!(!stderr.contains("--adopt"), "rerunning isn't the only answer:\n{stderr}");
+
+    server.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rotation_requires_the_server() {
     let tmp = tempfile::tempdir().unwrap();

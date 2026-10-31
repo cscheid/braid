@@ -18,6 +18,18 @@ mechanics, except no forwarding pointer is written into the old document
 (the attacker can read it — a pointer would hand them the new
 capability). Distribute the new secret out-of-band with `braid secret`.
 
+## When the doc id isn't in `.braid.toml`
+
+braid rewrites `.braid.toml` itself, but it can't rewrite
+`~/.config/braid/projects.toml` or an environment variable. In those setups,
+both `braid rotate` and `braid rotate --adopt` print the new `doc_id` on stdout
+and tell you what to update. `--adopt` first checks that the successor loads.
+The clone keeps reporting the rotation until you make the change.
+
+All clones that share a `projects.toml` entry switch together when you update
+it, so they don't each need `--adopt`. The printed id grants read and write
+access, so keep it out of logs and shared text.
+
 Honest limits: rotation protects *future* reads and writes. The old
 document's history remains readable forever to anyone holding the old id;
 revocation cannot un-leak the past.
