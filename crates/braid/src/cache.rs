@@ -11,7 +11,7 @@
 //! we restore the original first component from the *query prefix*. This is
 //! sound because samod only ever calls `load_range` with prefixes of the
 //! form `[doc_id, "snapshot"|"incremental"]` (verified against samod-core
-//! 0.10; see `actors/document/load.rs`). An empty prefix cannot be
+//! 0.16; see `actors/document/load.rs`). An empty prefix cannot be
 //! un-mapped, so it fails closed (returns nothing) rather than returning
 //! corrupted keys.
 //!

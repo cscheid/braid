@@ -208,6 +208,58 @@ async fn two_clones_converge_through_the_loom() {
     loom.stop().await;
 }
 
+/// The loom must never volunteer a document to a peer that didn't ask for it
+/// by id: doc ids are bearer capabilities, and announcing would leak every
+/// tenant's skein to every connected peer.
+#[tokio::test(flavor = "multi_thread")]
+async fn loom_does_not_announce_documents_to_other_peers() {
+    use samod::storage::{InMemoryStorage, Storage, StorageKey};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let loom = Loom::start(&["--in-memory"]).await;
+
+    // A bystander connects first and holds no documents.
+    let storage = InMemoryStorage::new();
+    let bystander = samod::Repo::build_tokio().with_storage(storage.clone()).load().await;
+    let url = samod::Url::parse(&loom.url).unwrap();
+    let dialer = bystander
+        .dial(samod::BackoffConfig::default(), std::sync::Arc::new(braid::ws::WsDialer::new(url)))
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), dialer.established())
+        .await
+        .expect("bystander did not connect in time")
+        .unwrap();
+
+    // Another tenant publishes a skein through the loom.
+    let a = Clone_::new(tmp.path(), "a");
+    a.braid().args(["init", "--name", "private", "--sync-server", &loom.url]).assert().success();
+    a.braid().args(["create", "secret strand"]).assert().success();
+    let doc_id = a.doc_id();
+
+    // Give an announcement time to arrive, then check nothing reached the
+    // bystander.
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let prefix = StorageKey::from_parts(vec![doc_id.clone()]).unwrap();
+    assert!(
+        storage.load_range(prefix).await.is_empty(),
+        "the loom announced a document to a peer that never asked for it"
+    );
+
+    // Positive control: the same connection can fetch it by id, so the
+    // emptiness above isn't just a dead connection.
+    let found = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        bystander.find(doc_id.parse().unwrap()),
+    )
+    .await
+    .expect("find timed out")
+    .unwrap();
+    assert!(found.is_some(), "a peer that knows the id must be able to fetch the skein");
+
+    bystander.stop().await;
+    loom.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn loom_persists_skeins_across_restart() {
     let tmp = tempfile::tempdir().unwrap();

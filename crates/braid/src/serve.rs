@@ -13,8 +13,8 @@
 //!
 //! Two properties matter beyond the happy path:
 //!
-//! - **Announce policy**: [`NeverAnnounce`]. samod's default
-//!   (`AlwaysAnnounce`) would announce every document the loom is
+//! - **Share policy**: read-write without announcing. samod's default
+//!   (read-write with announcements) would announce every document the loom is
 //!   synchronizing to every connected peer — leaking doc ids, which are
 //!   bearer capabilities, across tenants. The loom only ever responds to
 //!   requests for documents the peer already knows by id.
@@ -26,7 +26,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use samod::{AcceptorEvent, NeverAnnounce, Repo};
+use samod::{AcceptorEvent, Repo, ShareConfig};
 
 use crate::cache;
 
@@ -38,21 +38,18 @@ pub struct ServeOpts {
 }
 
 pub async fn serve(opts: ServeOpts) -> Result<()> {
+    let no_announce = ShareConfig::read_write().with_announce(false);
     let repo = match &opts.data_dir {
         Some(dir) => {
             let storage = cache::open_cache_storage(dir)
                 .with_context(|| format!("cannot open loom storage at {}", dir.display()))?;
-            Repo::build_tokio()
-                .with_storage(storage)
-                .with_announce_policy(NeverAnnounce)
-                .load()
-                .await
+            Repo::build_tokio().with_storage(storage).with_share_policy(no_announce).load().await
         }
         None => {
             debug_assert!(opts.in_memory, "clap requires one of --data-dir / --in-memory");
             Repo::build_tokio()
                 .with_storage(samod::storage::InMemoryStorage::new())
-                .with_announce_policy(NeverAnnounce)
+                .with_share_policy(no_announce)
                 .load()
                 .await
         }
@@ -78,7 +75,7 @@ pub async fn serve(opts: ServeOpts) -> Result<()> {
     eprintln!("loom: point clients here with BRAID_SYNC_URL={url} (or sync_server in .braid.toml)");
     eprintln!("Press Ctrl-C to stop.");
 
-    // events() borrows the handle (samod 0.10 overcaptures under Rust
+    // events() borrows the handle (samod overcaptures under Rust
     // 2024 impl-Trait rules), so give the logging task its own clone.
     let event_acceptor = acceptor.clone();
     let event_log = tokio::spawn(async move {

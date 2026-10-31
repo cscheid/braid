@@ -28,10 +28,17 @@ opt-level = 3
 [profile.release]
 strip = true
 
+# Release optimization with symbols, for samply/sample profiling. See
+# claude-notes/instructions/performance-profiling.md.
+[profile.release-perf]
+inherits = "release"
+debug = true
+strip = false
+
 [workspace.dependencies]
 braid-config = { path = "crates/braid-config" }
-automerge = "0.9.0"
-samod = "0.10.0"
+automerge = "0.12.0"
+samod = "0.16.0"
 axum = "0.8"
 rust-embed = "8"
 serde = { version = "1", features = ["derive"] }

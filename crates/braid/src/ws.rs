@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 use futures::future::BoxFuture;
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use rustls::pki_types::CertificateDer;
-use samod::{Dialer, Transport, Url};
+use samod::{DialError, Dialer, Transport, Url};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -88,14 +88,15 @@ impl WsDialer {
 }
 
 impl Dialer for WsDialer {
+    /// Every failure is treated as transient; the caller's timeout bounds
+    /// the retries.
+    type Error = std::convert::Infallible;
+
     fn url(&self) -> Url {
         self.url.clone()
     }
 
-    fn connect(
-        &self,
-    ) -> BoxFuture<'static, Result<Transport, Box<dyn std::error::Error + Send + Sync + 'static>>>
-    {
+    fn connect(&self) -> BoxFuture<'static, Result<Transport, DialError<Self::Error>>> {
         let url = self.url.clone();
         Box::pin(async move {
             let connector = tokio_tungstenite::Connector::Rustls(client_config());
@@ -105,7 +106,8 @@ impl Dialer for WsDialer {
                 false,
                 Some(connector),
             )
-            .await?;
+            .await
+            .map_err(DialError::transient)?;
             Ok(ws_transport(ws))
         })
     }
