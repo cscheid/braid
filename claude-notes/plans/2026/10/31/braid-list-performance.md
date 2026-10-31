@@ -169,6 +169,59 @@ braid's: `sync.rs` sets `max_retries: None` and relies on the outer timeout.
 The patch ported to a scratch copy of samod 0.16 passes `cargo test -p samod-core`
 (115 passed, 0 failed), including both compaction tests.
 
+## Is character-level merging actually used?
+
+Every write goes through braid. On the CLI and MCP that means
+`reconcile_issue`; in `braid ui` it means `StrandDetail.tsx` and
+`NewStrandDialog.tsx`. Writes that create or edit `Text`:
+
+| Operation | `Text` effect |
+|---|---|
+| `create`, `import`, UI new strand | Creates `Text` for prose fields |
+| `comment`, UI add comment | Creates `Text` for the body; no command edits a comment |
+| `update --description/--design/--acceptance-criteria/--notes` | `update_text`, diffing old against new |
+| UI edit of description, criteria, notes | Assignment (`r.description = v`) |
+| status, labels, dependencies, title, assignee | Scalars and maps; no `Text` |
+
+History of the q2 skein, decoded change by change. A document with deliberately
+concurrent edits reported them correctly, so the analyzer can see them.
+
+| Measure | Count |
+|---|---:|
+| Changes | 7,068 |
+| Create `Text` without editing any | 4,575 |
+| Scalars and maps only | 2,404 |
+| **Edit an existing `Text`** | **89 (1.3%)** |
+| `Text` objects ever edited after creation | 76 of 4,701 |
+| Comment bodies ever edited | 0 of 1,956 |
+| Characters written at creation | 3,904,539 |
+| Characters inserted / deleted by edits | 54,525 / 14,665 |
+| Concurrent change pairs in the whole history | 6,284 |
+| ... touching the same strand | **0** |
+| **Concurrent edits to the same `Text`** | **0** |
+
+Limits: this is one skein, and most changes have no timestamp (6,868 of 7,068 read
+as 1970), so the data can't show change over time. A zero also doesn't show what
+would happen with heavier concurrent use.
+
+Seven values that should be scalars were written as `Text` in q2 (`status` 2,
+`updated_at` 3, `assignee` 1, `closed_at` 1). Plain JS string assignment produces
+exactly this, which fits the UI's move to `RawString`, but the source of these
+writes wasn't confirmed.
+
+The UI's assignment doesn't merge. Concurrent edits of `"hello world"` in the JS
+library give `"hello there world"` by assignment (one side lost) and
+`"hello there world!!"` by `updateText`. So only CLI and MCP updates get character
+merging today.
+
+Constraints for a schema change, from reading the code (not tested):
+
+- Ops already in history stay there, so converting fields in place won't shrink an
+  existing skein. Getting the gain needs a new document, such as through `rotate`.
+- `reconcile_text` replaces any non-`Text` value with new `Text`, even when the
+  content is unchanged. Clients at 0.7.0 would turn scalar prose back into `Text` on
+  every strand they update, including all of that strand's comments.
+
 ## Recommendation
 
 Update, same day: samod 0.16 / automerge 0.12 is done separately (see
