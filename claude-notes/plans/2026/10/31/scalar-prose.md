@@ -31,7 +31,7 @@ characters, and its 7,068 changes contain no concurrent edits to the same `Text`
 - [x] Run `braid ui` in a browser (Carlos, on this repo's skein, on a legacy strand):
       description edit and new comment stored as `Str`, cleared notes removed, old
       comment still `Text`, no conflicts, one head, hydrates on the new build and 0.7.0
-- [ ] Decide when to release and rotate the real q2 skein
+- [x] Release v0.8.0 and rotate the real q2 skein (2026-10-31)
 
 ## Measurements
 
@@ -81,3 +81,15 @@ A 0.7.0 client on a scalar skein reads identically, and the new client reads wha
 writes. But it converts prose to `Text` on the strands it updates: three updates to
 one strand added about 9,800 ops (61,933 to 71,741). This is bounded by the prose on
 those strands and loses no data, but it erodes the gain until the next rotation.
+
+## q2 rotation outcome
+
+Rotated with 0.8.0 against `sync.automerge.org`: 2,673 strands in 7.1s.
+`list --all --json` was byte-identical to a recording made just before, in the
+rotating clone and in a fresh clone fetching from the server (1.80s, no cache).
+Online `list` took 0.64-0.73s over five runs, with one at 1.16s, against 2.06s before.
+
+`rotate --adopt` from a stale clone with `projects.toml` config moved the offline
+straggler to `.braid-stragglers.jsonl` and printed the new id, but exited 1 until the
+id was pasted in (filed as a bug). The test straggler remains in the frozen old
+document only.
