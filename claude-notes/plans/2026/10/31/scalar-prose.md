@@ -28,7 +28,9 @@ characters, and its 7,068 changes contain no concurrent edits to the same `Text`
 - [x] Docs: agents-info, syncing, rotation, schemas
 - [x] `cargo xtask ci` (335 passed, 1 ignored)
 - [x] Measure on a copy of q2
-- [ ] Run `braid ui` in a browser against a scalar skein
+- [x] Run `braid ui` in a browser (Carlos, on this repo's skein, on a legacy strand):
+      description edit and new comment stored as `Str`, cleared notes removed, old
+      comment still `Text`, no conflicts, one head, hydrates on the new build and 0.7.0
 - [ ] Decide when to release and rotate the real q2 skein
 
 ## Measurements
