@@ -16,7 +16,7 @@ enum Cmd {
         /// Display name for the skein (default: current directory name)
         #[arg(long)]
         name: Option<String>,
-        /// Prefix for generated issue ids
+        /// Prefix for generated strand ids
         #[arg(long, default_value = "br")]
         prefix: String,
         /// Adopt an existing skein by document id instead of creating one
@@ -53,7 +53,7 @@ enum Cmd {
         /// strand depends on each target. A missing target fails the create.
         #[arg(long = "deps", value_delimiter = ',')]
         deps: Vec<String>,
-        /// Print the full issue as JSON instead of just the id
+        /// Print the full strand as JSON instead of just the id
         #[arg(long)]
         json: bool,
     },
@@ -126,7 +126,7 @@ enum Cmd {
         ids: Vec<String>,
         #[arg(long)]
         reason: Option<String>,
-        /// Close even if the issue still has open children
+        /// Close even if the strand still has open children
         #[arg(long)]
         force: bool,
     },
@@ -279,9 +279,9 @@ enum DepCmd {
         #[arg(short = 't', long = "type")]
         dep_type: Option<String>,
     },
-    /// List dependencies of an issue, both directions
+    /// List dependencies of a strand, both directions
     List { issue: String },
-    /// Recursive parent-child descendant tree of an issue (epic → subtasks)
+    /// Recursive parent-child descendant tree of a strand (epic → subtasks)
     Tree {
         issue: String,
         #[arg(long)]
