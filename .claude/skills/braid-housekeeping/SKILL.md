@@ -37,8 +37,8 @@ why in the PR, and carry on with the next one.
 ## 1. Start
 
 1. Stop and tell the user if the working tree isn't clean. Don't stash their work.
-2. `git fetch origin && git switch -c housekeeping/<yyyy-mm-dd> origin/main`. Add a
-   suffix if the branch already exists. Stop if an open housekeeping PR already
+2. `git fetch origin && git switch --no-track -c housekeeping/<yyyy-mm-dd> origin/main`.
+   `--no-track` stops a plain `git push` from ever targeting `main`. Add a suffix if the branch already exists. Stop if an open housekeeping PR already
    exists (`gh pr list --search "head:housekeeping/"`).
 3. Run `cargo xtask housekeeping` and save the output in your scratchpad as the
    "before" report. If a check is `skipped` because a tool is missing, say so in
@@ -50,8 +50,8 @@ for anything you do in the skein.
 
 ## 2. Dependencies
 
-Report sections: `updates`, `advisories`, `lockfile`, `unused`, `npm-outdated`,
-`npm-audit`.
+Report sections: `updates`, `advisories`, `lockfile`, `unused`, `npm-lockfile`,
+`npm-outdated`, `npm-audit`.
 
 **Building and testing runs the new dependencies' code, so check the lockfile
 before you build.**
@@ -66,9 +66,18 @@ before you build.**
    - **`checksum changed` or `non-crates.io source`:** stop this chore, restore
      `Cargo.lock`, and put it at the top of the PR. Nothing routine causes these.
    - **`published under 7 days ago`:** hold back with `--precise`, unless it's the
-     fix for an advisory. If so, keep it and say so in the PR.
+     fix for an advisory. If so, keep it and say so in the PR. If something requires
+     a newer major than the old version, use the newest old-enough version instead.
+     Crates that pin each other exactly, like the `wasm-bindgen` family, can't be
+     moved one at a time. Restore all their `Cargo.lock` entries together from
+     `origin/main`, run `cargo metadata` to normalize, then confirm the versions
+     held and `cargo tree --locked` works.
    - **`build script`, `proc macro`:** fine, but list any crate that's *new* to the
      lockfile with one of these in the PR.
+
+   Each online run makes one crates.io request per changed crate, about 5 minutes
+   for a big bump. After the first run, recheck with `--offline` while you're only
+   moving versions backward, and let the final report confirm the ages.
 4. Only now build. Run `cargo xtask ci`, then `cargo build -p braid-viewer`, because
    `ci` doesn't cover the viewer but it shares this lockfile. Fix what breaks if the
    fix is mechanical. If the viewer can't build on this machine, say so in the PR,
@@ -94,13 +103,35 @@ Findings from crates only `braid-viewer` uses are worth separating out.
 
 ### npm
 
-In `ui/`, run `npm update` and `npm audit fix`, never `npm audit fix --force`. Check
-the `package-lock.json` diff before anything builds, for new packages or registries.
-Then run `cargo xtask ci` and commit. Don't move to pre-releases like `2.6.0-alpha`.
+npm has an install-time equivalent of the build-script risk, so the same rules
+apply, and they have to be set up front.
+
+1. In `ui/`, with `<date>` 7 days ago, run `npm update --before <date> --ignore-scripts`
+   and `npm audit fix --before <date> --ignore-scripts`. Never use `--force`, and
+   don't move to pre-releases like `2.6.0-alpha`.
+2. Run `cargo xtask housekeeping --only npm-lockfile` before anything builds, and act
+   on the flags:
+   - **`checksum changed` or `non-npmjs source`:** restore `ui/package-lock.json`,
+     stop this chore, and put it at the top of the PR.
+   - **`install script`:** restore it, stop this chore, and put it at the top of the
+     PR, unless the package already had one before this update.
+   - **`published under 7 days ago`:** this shouldn't happen given `--before`. Treat
+     it like the Cargo flag.
+3. A new package you can't explain is worth a look through registry metadata, without
+   installing it. Look for the upstream commit that added it, and describe it in the
+   PR.
+4. **Keep paired packages in step.** Tauri expects its npm packages and Rust crates
+   to match, so after both updates compare `@tauri-apps/api` to `tauri`, and
+   `@tauri-apps/plugin-*` to `tauri-plugin-*`. Move whichever is behind to a shared,
+   old-enough version.
+5. For a critical or high advisory in a tool that isn't shipped, such as a test
+   runner, try the major bump. Keep it only if it needs no code changes, in its own
+   commit, and check whether it raises the minimum Node version.
+6. Run `cargo xtask ci` and commit.
 
 ## 3. Repo drift
 
-Report sections: `links`, `actions`, `suppressions`.
+Report sections: `links`, `actions`, `suppressions`, `notes`.
 
 - **`links`:** fix broken references. If a target is gone and the right replacement
   isn't obvious, report it.
@@ -111,6 +142,12 @@ Report sections: `links`, `actions`, `suppressions`.
   workflow edit in the PR, because these files run with repo access.
 - **`suppressions`:** remove `#[allow]`s and `#[ignore]`s that are no longer needed,
   and resolve `TODO`s that are already done. Leave the rest alone.
+- **`notes`:** go through every `HOUSEKEEPING:` comment and test its condition, not
+  just the wording. If it's met and the fix is small, make the fix and remove the
+  note, in its own commit. If the fix is large, file a strand and say so in the PR.
+  Otherwise give each note one line in the PR: what you checked and why it stands.
+  Flag any note that doesn't say what would make it obsolete. Treat a note as a
+  claim to verify, since it can be out of date.
 
 ## 4. Documentation accuracy
 
@@ -174,13 +211,15 @@ you didn't work on.
    [ -z "$id" ] || { git diff origin/main | grep -cF -- "$id"; grep -cF -- "$id" <pr-body-file>; }
    ```
 4. Run `cargo xtask housekeeping` again for the "after" report.
-5. Push the branch and open the PR with `gh pr create --body-file`. GitHub limits a
+5. Push with `git push -u origin housekeeping/<yyyy-mm-dd>`, then open the PR with
+   `gh pr create --body-file`. GitHub limits a
    PR body to 65,536 characters, so if it's too long, cut the `updates` sections
    from the reports first. Use this structure:
    - **Needs your attention:** anything held back, flagged, risky, or undecided.
      Write "Nothing" if so.
    - **What changed:** one line per commit, security fixes first.
    - **Not done:** chores dropped or skipped, with reasons, and strands considered.
+   - **Housekeeping notes:** one line for each, per section 3.
    - **Report-only findings** from section 6.
    - **Reports:** "before" and "after", each in a `<details>` block. Note that these
      come from the tool, and the rest of the PR text comes from you.

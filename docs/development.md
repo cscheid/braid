@@ -57,7 +57,7 @@ nobody has reviewed yet.
 cargo xtask housekeeping                     # everything, comparing to origin/main
 cargo xtask housekeeping --offline           # skip anything needing the network
 cargo xtask housekeeping --only lockfile,links
-cargo xtask housekeeping --base <ref>        # compare Cargo.lock to another ref
+cargo xtask housekeeping --base <ref>        # compare lockfiles to another ref
 ```
 
 | Check | Reports | Needs |
@@ -66,10 +66,12 @@ cargo xtask housekeeping --base <ref>        # compare Cargo.lock to another ref
 | `updates` | Available Cargo updates | network |
 | `advisories` | RustSec advisories | `cargo-audit` |
 | `unused` | Possibly unused dependencies | `cargo-machete` |
+| `npm-lockfile` | `ui/` packages changed since the base ref, flagging install scripts, non-npmjs sources, changed checksums, and versions published under 7 days ago | |
 | `npm-outdated`, `npm-audit` | State of `ui/` dependencies | npm, network |
 | `links` | Broken links in the docs | `lychee` |
 | `actions` | GitHub Actions in use, flagging mixed versions | |
 | `suppressions` | `#[allow]`, `#[ignore]`, `TODO` and `FIXME` in Rust files | |
+| `notes` | `HOUSEKEEPING:` comments left for future runs, in any tracked file except Markdown | |
 
 Install commands are under [Prerequisites](#prerequisites). A check whose tool is missing shows as `skipped` in the summary rather than
 passing. The command exits `0` when every check ran, even with findings or
