@@ -28,7 +28,6 @@ braid-config = { workspace = true }
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 # time 0.3.48 added ModifierValue, which breaks tauri's blanket From impls
 # under Rust ≥1.94 coherence (E0119). 0.3.47 satisfies serde_with's ~0.3.47
@@ -36,3 +35,7 @@ thiserror = { workspace = true }
 time = "=0.3.47"
 tauri-plugin-log = "2"
 log = "0.4"
+
+# `time` is an intentional version pin (see its comment above), not a direct use.
+[package.metadata.cargo-machete]
+ignored = ["time"]
