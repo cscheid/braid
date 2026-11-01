@@ -153,8 +153,8 @@ fn ui_npm(args: &[&str]) -> i32 {
 
 /// Build the React UI in `ui/` using npm.
 ///
-/// The built output (`ui/dist/`) is committed to the repository so that
-/// `cargo build` works without Node.js — only run this when UI source changes.
+/// `cargo build` already does this through `crates/braid/build.rs`, and the
+/// output (`ui/dist/`) is gitignored. This is for building the UI on its own.
 fn build_ui() -> i32 {
     for args in [&["ci"][..], &["run", "build"][..]] {
         let code = ui_npm(args);

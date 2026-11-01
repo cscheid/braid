@@ -44,7 +44,6 @@ clap = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 sha2 = "0.10"
 toml = "0.8"
 rmcp = { version = "1.7.0", default-features = false, features = ["server", "transport-io"] }
