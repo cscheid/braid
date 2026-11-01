@@ -60,7 +60,8 @@ isn't already. To verify a manual download, the same minisign key and
 
 ## From source
 
-With a Rust toolchain (any platform):
+With a Rust toolchain and Node.js with npm (any platform), since the build
+compiles the web UI:
 
 ```sh
 cargo install --git https://github.com/cscheid/braid braid

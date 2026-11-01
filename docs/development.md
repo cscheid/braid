@@ -7,7 +7,7 @@ To build and test a checkout, you need:
 | Tool | Needed for | Install |
 |---|---|---|
 | Rust (stable), with clippy and rustfmt | Everything. CI uses the latest stable, and the repo doesn't pin a version, so keep yours current | [rustup](https://rustup.rs), then `rustup update stable` and `rustup component add clippy rustfmt` |
-| Node.js and npm | Any `cargo build` or `cargo test`, because `crates/braid/build.rs` builds the web UI, and the UI tests | [nodejs.org](https://nodejs.org) or your version manager |
+| Node.js 22.12 or newer, with npm | Any `cargo build` or `cargo test`, because `crates/braid/build.rs` builds the web UI, and the UI tests | [nodejs.org](https://nodejs.org) or your version manager |
 | minisign | `cargo test`: the installer tests fail if it's missing | `brew install minisign`, `apt install minisign`, `dnf install minisign`, or `apk add minisign` |
 
 The first build also needs network access, to download crates and run `npm ci`.
