@@ -15,6 +15,35 @@ Design decisions and phase history live in
 [terminology](terminology.md). This repo dogfoods braid — run `braid list`
 here to see its own skein.
 
+## Housekeeping report
+
+`cargo xtask housekeeping` prints a Markdown report of periodic repo chores. It
+never changes the repo, runs no dependency code (no build scripts or proc
+macros), and doesn't touch your skein, so it's safe to run on a dependency bump
+nobody has reviewed yet.
+
+```sh
+cargo xtask housekeeping                     # everything, comparing to origin/main
+cargo xtask housekeeping --offline           # skip anything needing the network
+cargo xtask housekeeping --only lockfile,links
+cargo xtask housekeeping --base <ref>        # compare Cargo.lock to another ref
+```
+
+| Check | Reports | Needs |
+|---|---|---|
+| `lockfile` | Crates changed since the base ref, flagging build scripts, proc macros, non-crates.io sources, changed checksums, and versions published under 7 days ago | |
+| `updates` | Available Cargo updates | network |
+| `advisories` | RustSec advisories | `cargo-audit` |
+| `unused` | Possibly unused dependencies | `cargo-machete` |
+| `npm-outdated`, `npm-audit` | State of `ui/` dependencies | npm, network |
+| `links` | Broken links in the docs | `lychee` |
+| `actions` | GitHub Actions in use, flagging mixed versions | |
+| `suppressions` | `#[allow]`, `#[ignore]`, `TODO` and `FIXME` in Rust files | |
+
+A check whose tool is missing shows as `skipped` in the summary rather than
+passing. The command exits `0` when every check ran, even with findings or
+skips, `1` if a check failed to run, and `2` on a usage error.
+
 ## Building these docs
 
 This site is an [mdBook](https://rust-lang.github.io/mdBook/) built from the
