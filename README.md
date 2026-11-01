@@ -75,7 +75,9 @@ Details (persistence, exposure beyond loopback, TLS, systemd):
 
 ## Contributing
 
-The [development guide](https://cscheid.github.io/braid/development.html)
-covers the workspace layout, tests, and how to build this documentation site
+The [development guide](docs/development.md) lists the
+[tools you need to install](docs/development.md#prerequisites) (a checkout needs
+Rust, Node.js and minisign to build and test), and covers the workspace layout,
+tests, and how to build this documentation site
 (an mdBook under `docs/`; `cargo xtask docs-serve` previews it locally). This
 repo dogfoods braid — run `braid list` here to see its own skein.

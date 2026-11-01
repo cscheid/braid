@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "repo automation (cargo xtask pattern): ci pipeline, fmt, git hooks"
+description = "repo automation (cargo xtask pattern): ci pipeline, fmt, git hooks, housekeeping report"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

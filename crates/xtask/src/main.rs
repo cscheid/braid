@@ -6,6 +6,8 @@
 //! sync); the CI gate is the binding enforcement, this is the local
 //! convenience that keeps pushes from ever hitting it.
 
+mod housekeeping;
+
 use std::path::PathBuf;
 use std::process::{Command, exit};
 
@@ -16,6 +18,10 @@ commands:
   ci [--dry-run]   run the full CI pipeline locally (fmt --check, clippy,
                    build, test, UI tests); --dry-run prints the commands
   fmt              apply formatting (cargo fmt --all)
+  housekeeping [--base <ref>] [--offline] [--only <check,...>]
+                   print a Markdown report of repo chores (dependency changes,
+                   updates, advisories, doc links, ...); read-only, and runs
+                   no dependency code
   build-ui         build the React UI (npm ci + vite build) in ui/
   test-ui          run the React UI unit tests (vitest) in ui/
   viewer-dev       run braid-viewer in Tauri dev mode (`cargo tauri dev`)
@@ -48,6 +54,7 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("ci") => ci(&args[1..]),
         Some("fmt") => run_steps(&[&["cargo", "fmt", "--all"]]),
+        Some("housekeeping") => housekeeping::run(&args[1..]),
         Some("build-ui") => build_ui(),
         Some("test-ui") => test_ui(),
         Some("viewer-dev") => viewer_tauri("dev", &args[1..]),
