@@ -459,6 +459,137 @@ fn suppressions_lists_tracked_rust_files_only() {
     assert!(!report.contains("notes.md"), "{report}");
 }
 
+#[test]
+fn notes_lists_markers_in_any_tracked_text_file_except_markdown() {
+    let fixture = Fixture::unchanged();
+    fixture.write("crates/a/Cargo.toml", "# HOUSEKEEPING: drop this pin when x ships\na = 1\n");
+    fixture.write("install.sh", "true\n# HOUSEKEEPING: remove once y is gone\n");
+    fixture.write("docs/guide.md", "Mark them with `HOUSEKEEPING:` comments.\n");
+    fixture.write("untracked.toml", "# HOUSEKEEPING: not tracked\n");
+    fixture.git(&["add", "crates/a/Cargo.toml", "install.sh", "docs/guide.md"]);
+    let report = fixture.report(&["--only", "notes"]);
+    assert_eq!(status_of(&report, "notes"), "info");
+    assert_contains(&report, "crates/a/Cargo.toml:1: # HOUSEKEEPING: drop this pin when x ships");
+    assert_contains(&report, "install.sh:2:");
+    assert!(!report.contains("guide.md"), "{report}");
+    assert!(!report.contains("not tracked"), "{report}");
+}
+
+#[test]
+fn notes_is_clean_without_markers() {
+    let report = Fixture::unchanged().report(&["--only", "notes"]);
+    assert_eq!(status_of(&report, "notes"), "clean");
+}
+
+// ---------------------------------------------------------------------------
+// npm-lockfile
+// ---------------------------------------------------------------------------
+
+/// A package-lock.json with npm's layout. Each entry is
+/// (path after node_modules/, version, resolved host, integrity, install script).
+fn npm_lock(entries: &[(&str, &str, &str, &str, bool)]) -> String {
+    let mut out = String::from(
+        "{\n  \"name\": \"ui\",\n  \"lockfileVersion\": 3,\n  \"packages\": {\n    \"\": {\n      \"name\": \"ui\"\n    },\n",
+    );
+    for (i, (name, version, host, integrity, script)) in entries.iter().enumerate() {
+        out.push_str(&format!(
+            "    \"node_modules/{name}\": {{\n      \"version\": \"{version}\",\n      \"resolved\": \"https://{host}/x.tgz\",\n      \"integrity\": \"{integrity}\",\n"
+        ));
+        if *script {
+            out.push_str("      \"hasInstallScript\": true,\n");
+        }
+        // Nested fields mustn't be mistaken for the package's own.
+        out.push_str("      \"dependencies\": {\n        \"version\": \"9.9.9\"\n      }\n");
+        out.push_str(if i + 1 == entries.len() { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  }\n}\n");
+    out
+}
+
+const NPMJS: &str = "registry.npmjs.org";
+
+fn npm_fixture(base: &str, current: &str) -> Fixture {
+    let fixture = Fixture::unchanged();
+    fixture.write("ui/package-lock.json", base);
+    fixture.git(&["add", "ui/package-lock.json"]);
+    fixture.git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "ui"]);
+    fixture.write("ui/package-lock.json", current);
+    fixture
+}
+
+#[test]
+fn npm_lockfile_reports_changes_with_flags() {
+    let base = npm_lock(&[
+        ("bumped", "1.0.0", NPMJS, "a", false),
+        ("gone", "1.0.0", NPMJS, "b", false),
+        ("same", "1.0.0", NPMJS, "c", false),
+        ("tampered", "1.0.0", NPMJS, "d", false),
+    ]);
+    let current = npm_lock(&[
+        ("bumped", "1.1.0", NPMJS, "e", false),
+        ("@scope/scripted", "2.0.0", NPMJS, "f", true),
+        ("elsewhere", "3.0.0", "evil.example.com", "g", false),
+        ("outer/node_modules/nested", "4.0.0", NPMJS, "h", false),
+        ("same", "1.0.0", NPMJS, "c", false),
+        ("tampered", "1.0.0", NPMJS, "i", false),
+    ]);
+    let report = npm_fixture(&base, &current).report(&["--offline", "--only", "npm-lockfile"]);
+    let row = |name: &str| {
+        let marker = format!("`{name}` ");
+        report.lines().find(|l| l.contains(&marker)).unwrap_or_default().to_string()
+    };
+    assert_eq!(status_of(&report, "npm-lockfile"), "findings");
+    assert_contains(&row("bumped"), "1.0.0 → 1.1.0");
+    assert_contains(&row("gone"), "(removed)");
+    assert_contains(&row("@scope/scripted"), "install script");
+    assert_contains(&row("elsewhere"), "non-npmjs source");
+    assert_contains(&row("outer/node_modules/nested"), "(new)");
+    assert_contains(&row("tampered"), "checksum changed");
+    assert!(!report.contains("`same`"), "{report}");
+    assert!(!report.contains("9.9.9"), "nested field taken as the version:\n{report}");
+}
+
+#[test]
+fn npm_lockfile_flags_recently_published_versions_when_online() {
+    let base = npm_lock(&[]);
+    let current = npm_lock(&[
+        ("young", "1.0.0", NPMJS, "a", false),
+        ("mature", "1.0.0", NPMJS, "b", false),
+        ("@scope/pkg", "2.0.0", NPMJS, "c", false),
+        ("vanished", "1.0.0", NPMJS, "d", false),
+    ]);
+    let fixture = npm_fixture(&base, &current);
+    // A registry document holds a `time` map keyed by version.
+    fixture.tool(
+        "curl",
+        r#"case "$*" in
+  *registry.npmjs.org/young*) echo '{"time":{"1.0.0":"2999-01-01T00:00:00Z"}}' ;;
+  *registry.npmjs.org/mature*) echo '{"time":{"1.0.0":"2020-01-01T00:00:00Z"}}' ;;
+  *registry.npmjs.org/@scope%2fpkg*) echo '{"time":{"2.0.0":"2999-01-01T00:00:00Z"}}' ;;
+  *) exit 22 ;;
+esac"#,
+    );
+    let report = fixture.report(&["--only", "npm-lockfile"]);
+    let row = |name: &str| {
+        let marker = format!("`{name}` ");
+        report.lines().find(|l| l.contains(&marker)).unwrap().to_string()
+    };
+    assert_contains(&row("young"), "published under 7 days ago");
+    assert_contains(&row("@scope/pkg"), "published under 7 days ago");
+    assert!(!row("mature").contains("published"), "{}", row("mature"));
+    assert_contains(&row("vanished"), "publish date unknown");
+}
+
+#[test]
+fn npm_lockfile_is_clean_or_skipped_when_nothing_to_compare() {
+    let lock = npm_lock(&[("same", "1.0.0", NPMJS, "c", false)]);
+    let report = npm_fixture(&lock, &lock).report(&["--offline", "--only", "npm-lockfile"]);
+    assert_eq!(status_of(&report, "npm-lockfile"), "clean");
+
+    let report = Fixture::unchanged().report(&["--offline", "--only", "npm-lockfile"]);
+    assert_eq!(status_of(&report, "npm-lockfile"), "skipped");
+}
+
 // ---------------------------------------------------------------------------
 // safety invariants
 // ---------------------------------------------------------------------------

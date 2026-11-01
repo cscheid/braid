@@ -26,7 +26,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const USAGE: &str = "\
 usage: cargo xtask housekeeping [--base <ref>] [--offline] [--only <check,...>]
 
-  --base <ref>       compare Cargo.lock against this ref (default: origin/main)
+  --base <ref>       compare lockfiles against this ref (default: origin/main)
   --offline          skip everything that needs the network
   --only <checks>    comma-separated subset of: ";
 
@@ -36,12 +36,20 @@ const CHECKS: &[&str] = &[
     "updates",
     "advisories",
     "unused",
+    "npm-lockfile",
     "npm-outdated",
     "npm-audit",
     "links",
     "actions",
     "suppressions",
+    "notes",
 ];
+
+const NPMJS_HOST: &str = "registry.npmjs.org";
+
+/// Marks a note to a future run: a workaround tied to nearby code that waits on
+/// a condition worth rechecking. See "Housekeeping notes" in CLAUDE.md.
+const NOTE_MARKER: &str = "HOUSEKEEPING:";
 
 const CRATES_IO_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
 
@@ -137,11 +145,13 @@ fn run_check(check: &str, root: &Path, options: &Options) -> Outcome {
         "updates" => check_updates(root, options),
         "advisories" => check_advisories(root, options),
         "unused" => check_unused(root),
+        "npm-lockfile" => check_npm_lockfile(root, options),
         "npm-outdated" => check_npm(root, options, "outdated"),
         "npm-audit" => check_npm(root, options, "audit"),
         "links" => check_links(root, options),
         "actions" => check_actions(root),
         "suppressions" => check_suppressions(root),
+        "notes" => check_notes(root),
         other => unreachable!("parse_args validated {other}"),
     }
 }
@@ -308,6 +318,8 @@ struct Package {
     version: String,
     source: Option<String>,
     checksum: Option<String>,
+    /// npm only: the package runs a script when installed.
+    install_script: bool,
 }
 
 /// Parse the `[[package]]` tables of a Cargo.lock. Its format is regular
@@ -324,6 +336,7 @@ fn parse_lockfile(text: &str) -> Vec<Package> {
                 version: String::new(),
                 source: None,
                 checksum: None,
+                install_script: false,
             });
             continue;
         }
@@ -421,6 +434,49 @@ fn lockfile_delta(base: &[Package], current: &[Package]) -> Vec<Change> {
         }
     }
     changes
+}
+
+/// Parse the `packages` of an npm package-lock.json. npm's fixed layout puts
+/// entries at indent 4 and their own fields at indent 6, which is regular enough
+/// to read without a JSON parser (see `parse_lockfile`). `name` is the path after
+/// the first `node_modules/`, so nested copies stay distinct. Entries with no
+/// `resolved` URL (workspace links, bundled copies) are left out.
+fn parse_npm_lockfile(text: &str) -> Vec<Package> {
+    let mut packages = Vec::new();
+    let mut current: Option<Package> = None;
+    for line in text.lines() {
+        let indent = line.len() - line.trim_start().len();
+        let line = line.trim();
+        if indent == 4 {
+            packages.extend(current.take().filter(|p: &Package| p.source.is_some()));
+            current = line
+                .strip_prefix("\"node_modules/")
+                .and_then(|rest| rest.strip_suffix("\": {"))
+                .map(|name| Package {
+                    name: name.to_string(),
+                    version: String::new(),
+                    source: None,
+                    checksum: None,
+                    install_script: false,
+                });
+            continue;
+        }
+        let (Some(package), 6) = (current.as_mut(), indent) else { continue };
+        let Some((key, value)) = line.trim_end_matches(',').split_once(": ") else { continue };
+        let value = value.trim_matches('"');
+        match key {
+            "\"version\"" => package.version = value.to_string(),
+            "\"integrity\"" => package.checksum = Some(value.to_string()),
+            "\"hasInstallScript\"" => package.install_script = value == "true",
+            "\"resolved\"" => {
+                let host = value.split("://").nth(1).and_then(|rest| rest.split('/').next());
+                package.source = Some(host.unwrap_or(value).to_string());
+            }
+            _ => {}
+        }
+    }
+    packages.extend(current.filter(|p: &Package| p.source.is_some()));
+    packages
 }
 
 /// What a crate's published source says about code it runs at build time.
@@ -575,6 +631,71 @@ fn check_lockfile(root: &Path, options: &Options) -> Outcome {
         Status::Findings,
         format!("{} crate(s) changed, {flagged} flagged", changes.len()),
         details,
+    )
+}
+
+/// When npm says this version was published, as an age in whole days. A registry
+/// document's `time` map is the only place a version is a key with a string value.
+fn npm_published_age_days(path: &str, version: &str, root: &Path, now: SystemTime) -> Option<i64> {
+    let name = path.rsplit("node_modules/").next()?;
+    let url = format!("https://{NPMJS_HOST}/{}", name.replace('/', "%2f"));
+    let agent = "braid-xtask-housekeeping (github.com/cscheid/braid)";
+    let out = tool("curl", &["-sfL", "-A", agent, &url], root).ok()?;
+    if out.code != Some(0) {
+        return None;
+    }
+    age_in_days(&json_string_field(&out.stdout, version)?, now)
+}
+
+fn check_npm_lockfile(root: &Path, options: &Options) -> Outcome {
+    let Ok(current) = std::fs::read_to_string(root.join("ui/package-lock.json")) else {
+        return Outcome::skipped("no ui/package-lock.json");
+    };
+    let spec = format!("{}:ui/package-lock.json", options.base);
+    let base = match tool("git", &["show", &spec], root) {
+        Ok(out) if out.code == Some(0) => out.stdout,
+        Ok(out) => return Outcome::error(format!("cannot read {spec}"), &out.combined()),
+        Err(e) => return Outcome::error("cannot run git", &e.to_string()),
+    };
+
+    let changes = lockfile_delta(&parse_npm_lockfile(&base), &parse_npm_lockfile(&current));
+    if changes.is_empty() {
+        return Outcome::clean();
+    }
+
+    let now = SystemTime::now();
+    let mut flagged = 0;
+    let mut rows = String::new();
+    for change in &changes {
+        let mut flags: Vec<String> = Vec::new();
+        if matches!(change, Change::ChecksumChanged(_)) {
+            flags.push("checksum changed".to_string());
+        }
+        if let Some(package) = change.current() {
+            if package.install_script {
+                flags.push("install script".to_string());
+            }
+            if package.source.as_deref() != Some(NPMJS_HOST) {
+                flags.push("non-npmjs source".to_string());
+            } else if !options.offline {
+                match npm_published_age_days(&package.name, &package.version, root, now) {
+                    Some(age) if age < MIN_AGE_DAYS => {
+                        flags.push(format!("published under {MIN_AGE_DAYS} days ago"));
+                    }
+                    Some(_) => {}
+                    None => flags.push("publish date unknown".to_string()),
+                }
+            }
+        }
+        if !flags.is_empty() {
+            flagged += 1;
+        }
+        rows.push_str(&format!("- {} {}\n", change.describe(), render_flags(&flags)));
+    }
+    Outcome::new(
+        Status::Findings,
+        format!("{} package(s) changed, {flagged} flagged", changes.len()),
+        rows,
     )
 }
 
@@ -813,6 +934,37 @@ fn check_suppressions(root: &Path) -> Outcome {
     )
 }
 
+fn check_notes(root: &Path) -> Outcome {
+    // These define the marker rather than use it.
+    const EXEMPT: &[&str] =
+        &["crates/xtask/src/housekeeping.rs", "crates/xtask/tests/housekeeping.rs"];
+
+    let files = match tool("git", &["ls-files"], root) {
+        Ok(out) if out.code == Some(0) => out.stdout,
+        Ok(out) => return Outcome::error("git ls-files failed", &out.combined()),
+        Err(e) => return Outcome::error("cannot run git", &e.to_string()),
+    };
+    let mut hits = Vec::new();
+    // Markdown is left out: notes belong beside code, and docs describe the marker.
+    for file in files.lines().filter(|f| !f.ends_with(".md") && !EXEMPT.contains(f)) {
+        // Binary files fail to read as text, and can't hold a note anyway.
+        let Ok(text) = std::fs::read_to_string(root.join(file)) else { continue };
+        for (index, line) in text.lines().enumerate() {
+            if line.contains(NOTE_MARKER) {
+                hits.push(format!("{file}:{}: {}", index + 1, line.trim()));
+            }
+        }
+    }
+    if hits.is_empty() {
+        return Outcome::clean();
+    }
+    Outcome::new(
+        Status::Info,
+        format!("{} note(s) to recheck", hits.len()),
+        fenced(&truncated(&hits.join("\n"))),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // tests
 // ---------------------------------------------------------------------------
@@ -827,6 +979,7 @@ mod tests {
             version: version.into(),
             source: Some(CRATES_IO_SOURCE.into()),
             checksum: Some(checksum.into()),
+            install_script: false,
         }
     }
 

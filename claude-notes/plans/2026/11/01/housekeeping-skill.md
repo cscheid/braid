@@ -13,12 +13,16 @@ also updates the `CLAUDE.md` git rule and `braid-release`.
 - [x] `.claude/skills/braid-housekeeping/SKILL.md`
 - [x] `CLAUDE.md`: pushing fresh branches and opening PRs is fine
 - [x] `braid-release`: release through a PR
-- [ ] First real run, with a narrow scope, and fix what it shows
+- [x] First real run (PR #27), and fix what it shows
+- [x] `npm-lockfile` check: npm gets the crate flags
+- [x] `HOUSEKEEPING:` markers and the `notes` check
 
 ## Decisions
 
 - `disable-model-invocation`: invoking this skill authorizes a push, so it must
   only ever run because someone asked.
+- Notes are for workarounds waiting on something external; strands are for work.
+  The rule is in `CLAUDE.md`.
 - The lockfile check comes before any build, since building runs the new code.
 - `samod` and `automerge` are held back from routine bumps.
 

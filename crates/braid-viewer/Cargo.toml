@@ -29,9 +29,10 @@ tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
+# HOUSEKEEPING: remove this pin once tauri restricts its blanket From impls.
 # time 0.3.48 added ModifierValue, which breaks tauri's blanket From impls
 # under Rust ≥1.94 coherence (E0119). 0.3.47 satisfies serde_with's ~0.3.47
-# floor and predates the trait. Remove when tauri restricts those impls.
+# floor and predates the trait.
 time = "=0.3.47"
 tauri-plugin-log = "2"
 log = "0.4"

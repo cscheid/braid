@@ -77,6 +77,19 @@ User-facing changes land **with their documentation in the same commit**:
 (every subcommand must appear in agents-info; every MCP tool in
 docs/mcp.md) — if it fails, update the docs, don't loosen the test.
 
+## Housekeeping notes
+
+To leave a note for future runs of the `braid-housekeeping` skill, put a comment
+starting with `HOUSEKEEPING:` beside the code it's about, and say what would make
+it obsolete: `# HOUSEKEEPING: remove this pin once tauri restricts its blanket From
+impls.` `cargo xtask housekeeping` lists these from every tracked file except
+Markdown, so they can't drop out of sight.
+
+- Use a note for a workaround tied to specific code that's waiting on something
+  outside our control. It goes away with the code it describes.
+- Use a strand for anything that needs real work or a decision. If a note's
+  condition is met and the fix turns out to be large, file a strand.
+
 ## Git workflow
 
 Committing locally is always fine, and so is pushing a fresh non-default
