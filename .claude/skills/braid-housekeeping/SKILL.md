@@ -5,7 +5,7 @@ disable-model-invocation: true
 ---
 
 Do this repo's periodic chores without supervision and finish with one PR for
-Carlos to review. Arguments, if any, narrow the scope (for example "no strands"
+the repo admins to review. Arguments, if any, narrow the scope (for example "no strands"
 or "dependencies only") and take precedence over the defaults here.
 
 Facts come from `cargo xtask housekeeping`, which is read-only and runs no
@@ -30,7 +30,7 @@ your environment, even through a filter you expect to redact it. Don't put the i
 in commits, PRs or logs.
 
 **Don't overreach.** No refactors, no design changes, nothing that needs a
-decision from Carlos. File a strand for those. It's better to deliver a small PR
+decision from the repo admins. File a strand for those. It's better to deliver a small PR
 than to force a chore through. If a chore fails or gets out of hand, undo it, say
 why in the PR, and carry on with the next one.
 

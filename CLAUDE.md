@@ -83,7 +83,7 @@ Committing locally is always fine, and so is pushing a fresh non-default
 branch and opening a PR from it. `main` is protected and only changes through
 PRs.
 
-**Ask Carlos first before** merging a PR, creating or pushing tags, force-pushing,
+**Ask the repo admins first before** merging a PR, creating or pushing tags, force-pushing,
 or deleting branches on origin. Never try to push directly to `main`.
 
 ## Development
@@ -91,7 +91,7 @@ or deleting branches on origin. Never try to push directly to `main`.
 Always follow TDD workflow: write/update tests BEFORE implementing features. When creating plans, include test specifications as the first phase. Never skip to implementation without a test plan.
 
 Run `cargo xtask ci` (fmt --check, clippy, build, full test suite — the
-same pipeline as CI) before asking Carlos to push. rustfmt is enforced;
+same pipeline as CI) before pushing. rustfmt is enforced;
 `cargo xtask fmt` applies it. Humans can opt into a pre-push hook with
 `cargo xtask install-hooks`.
 
