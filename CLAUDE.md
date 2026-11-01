@@ -79,10 +79,12 @@ docs/mcp.md) — if it fails, update the docs, don't loosen the test.
 
 ## Git workflow
 
-Committing locally is always fine. **Do not run git commands that change
-the remote (`git push`, `git push --force`, branch deletion on origin,
-etc.) without asking Carlos first** — even when CI or other tooling would
-benefit from a push. Ask, then push.
+Committing locally is always fine, and so is pushing a fresh non-default
+branch and opening a PR from it. `main` is protected and only changes through
+PRs.
+
+**Ask Carlos first before** merging a PR, creating or pushing tags, force-pushing,
+or deleting branches on origin. Never try to push directly to `main`.
 
 ## Development
 

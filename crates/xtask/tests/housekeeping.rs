@@ -584,3 +584,23 @@ fn runs_against_this_repository() {
     let report = String::from_utf8(out.get_output().stdout.clone()).unwrap();
     assert_contains(&report, "actions/checkout");
 }
+
+/// The skill works from the report, so it has to know about every check.
+#[test]
+fn housekeeping_skill_covers_every_check() {
+    let out = assert_cmd::Command::cargo_bin("xtask")
+        .unwrap()
+        .args(["housekeeping", "--frobnicate"])
+        .assert()
+        .code(2);
+    let usage = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    let checks = usage.split("subset of: ").nth(1).expect("usage lists the checks").trim();
+
+    let skill = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../.claude/skills/braid-housekeeping/SKILL.md");
+    let skill = std::fs::read_to_string(&skill)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", skill.display()));
+    for check in checks.split(", ") {
+        assert_contains(&skill, &format!("`{check}`"));
+    }
+}

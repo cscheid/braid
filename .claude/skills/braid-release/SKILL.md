@@ -12,9 +12,9 @@ prefix; the tag does. Signing needs the `MINISIGN_SECRET_KEY` repo secret
 to match the public key pinned in `install.sh` (the sign step verifies
 this and fails the release on mismatch).
 
-Follow these steps in order. **Ask before every push** (CLAUDE.md git rule) —
-the user asking for a release usually authorizes all of them, but say what
-you're pushing.
+Follow these steps in order. **Ask before merging or pushing a tag** (CLAUDE.md
+git rule) — the user asking for a release usually authorizes all of them, but say
+what you're doing.
 
 1. **Pre-flight**: working tree clean; `main` rebased on `origin/main`; latest
    CI run on origin/main is green (`gh run list --repo cscheid/braid --limit 1`).
@@ -25,8 +25,11 @@ you're pushing.
    `grep -rn "<old version>" --include="*.toml" --include="*.json" --include="*.md" . | grep -v target/`
 4. **Refresh the lockfile**: `cargo build` (Cargo.lock picks up the new version).
 5. **Gate**: `cargo xtask ci` (fmt + clippy -D warnings + full test suite).
-6. **Commit** `release: vX.Y.Z` and push to `origin/main`; wait for CI green.
-7. **Tag and push the tag**: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+6. **Open a PR**: `main` is protected, so commit `release: vX.Y.Z` on a
+   `release/vX.Y.Z` branch and open a PR. Wait for CI green and for the PR to be
+   merged, then `git switch main && git pull`.
+7. **Tag the merged commit and push the tag**: confirm `Cargo.toml` on `main` has
+   the new version, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 8. **Watch the Release workflow** (`gh run watch`); then verify the release:
    `gh release view vX.Y.Z` must show 15 assets — 5 platform archives
    (`braid-X.Y.Z-{darwin,linux}_{arm64,amd64}.tar.gz` and
