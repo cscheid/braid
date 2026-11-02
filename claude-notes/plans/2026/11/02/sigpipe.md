@@ -87,14 +87,14 @@ is in `Cargo.lock` (0.2.191) but is not yet a direct dependency of
       green.
 - [x] `cargo clippy -p braid --all-targets -- -D warnings`
 - [x] `cargo nextest run -p braid`
-- [ ] Manual check: `braid list | head -1; echo ${pipestatus[1]}` prints 141
+- [x] Manual check: `braid list | head -1; echo ${pipestatus[1]}` prints 141
       with no panic (zsh; `PIPESTATUS` in bash).
-- [ ] `cargo xtask ci` before pushing.
+- [x] `cargo xtask ci` before pushing.
 - [x] `q2 render --strict claude-notes/plans/2026/11/02/sigpipe.md` before
       pushing (the file is under `claude-notes/`).
-- [ ] If this is tracked as a strand, mark it `in_progress` with
+- [x] (N/A: no skein configured in this checkout; Windows follow-up noted in PR) If this is tracked as a strand, mark it `in_progress` with
       `BRAID_AUTHOR=claude` when starting and close it with a summary.
-- [ ] Reconcile this checklist against what landed, then commit the plan.
+- [x] Reconcile this checklist against what landed, then commit the plan.
 
 ## Details
 
