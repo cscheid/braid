@@ -50,6 +50,10 @@ rmcp = { version = "1.7.0", default-features = false, features = ["server", "tra
 axum = { workspace = true }
 rust-embed = { workspace = true, features = ["mime-guess"] }
 
+[target.'cfg(unix)'.dependencies]
+# SIGPIPE disposition for one-shot read commands (src/main.rs).
+libc = { workspace = true }
+
 [dev-dependencies]
 chrono = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util"] }

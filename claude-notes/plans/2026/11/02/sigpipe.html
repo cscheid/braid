@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="quarto-rust-0.36.0-nightly.20261027">
+<link rel="stylesheet" href="sigpipe_files/styles.css">
+<script src="sigpipe_files/bootstrap.bundle.min.js"></script>
+<script src="sigpipe_files/clipboard.min.js"></script>
+<script src="sigpipe_files/code-copy-init.js"></script>
+<script src="sigpipe_files/tabsets.js"></script>
+</head>
+<body class="fullcontent quarto-light">
+<a id="quarto-skip-link" class="visually-hidden-focusable" href="#quarto-document-content">Skip to main content</a>
+
+<div id="quarto-content" class="quarto-container page-columns page-rows-contents page-layout-article">
+
+<main class="content" id="quarto-document-content" tabindex="-1">
+
+
+
+<section id="handle-sigpipe-properly-for-one-shot-commands" class="section level1">
+<h1>Handle SIGPIPE properly for one-shot commands</h1>
+<section id="overview" class="section level2">
+<h2>Overview</h2>
+<p><code>braid list | head</code> panics with “failed printing to stdout: Broken pipe”.
+Rust’s runtime sets <code>SIGPIPE</code> to ignore, so a write to a closed pipe returns
+<code>EPIPE</code> and <code>println!</code> panics. The standard Unix behavior is to die quietly
+on <code>SIGPIPE</code> (<code>ls | head</code> exits 141 with no message).</p>
+<p>A global <code>signal(SIGPIPE, SIG_DFL)</code> in <code>main</code> is <strong>not</strong> the design: braid
+has long-lived paths (<code>braid serve</code>, <code>braid mcp</code> over stdio), and
+<code>SIGPIPE</code> disposition is process-wide, not per-fd. Rust ignores it so that
+writes surface as <code>Err</code> the code can handle.</p>
+<p><strong>Design:</strong> restore <code>SIG_DFL</code> only for an <strong>allowlist</strong> of read-only commands
+that print their result to stdout. An allowlist fails safe: a new command
+added later keeps Rust’s default (a panic on <code>| head</code>, the status quo)
+rather than silently gaining kill-on-EPIPE semantics.</p>
+<p>Key audit finding (see Details): <em>every</em> data command syncs (<code>open_skein</code>
+dials and pulls), so “commands that don’t sync” is nearly empty. What makes
+the read commands safe is different: they all call <code>session.shutdown()</code>
+(<code>repo.stop()</code>, which flushes the cache) <strong>before</strong> their first stdout
+write. So the kill can only land after sync and cache flush are finished.</p>
+<p>Rejected alternative: convert every <code>println!</code> in <code>commands.rs</code> (73 sites) to
+a helper that treats <code>ErrorKind::BrokenPipe</code> as a clean exit. More
+invasive, and a new <code>println!</code> reintroduces the bug (a <code>clippy.toml</code>
+<code>disallowed-macros</code> entry could guard that). Its one real advantage is
+that it also fixes Windows; see “Windows” under Details. Revisit if
+Windows <code>| head</code> matters.</p>
+<p>Corrections to the DeepWiki answer this plan started from: <code>main</code> is
+<code>async fn main()</code> returning <code>()</code> (<code>crates/braid/src/main.rs:294</code>), not
+<code>anyhow::Result&lt;()&gt;</code>; <code>mcp.rs</code> uses stdout as its protocol channel; <code>libc</code>
+is in <code>Cargo.lock</code> (0.2.191) but is not yet a direct dependency of
+<code>crates/braid</code>.</p>
+</section>
+<section id="phase-1-tests-first" class="section level2">
+<h2>Phase 1: tests first</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Add <code>crates/braid/tests/sigpipe.rs</code>. For determinism, do not race a
+drop against the child’s first write: create the pipe with
+ <code>std::io::pipe()</code> (stable since 1.87; confirm the toolchain), <code>drop</code>
+the read end <strong>before</strong> spawning, and pass the write end as the
+child’s stdout. Every stdout write then gets <code>EPIPE</code>, regardless of
+output size or timing, so no large fixture is needed.</label></li>
+<li><label><input type="checkbox" checked="" />Assert stderr (captured separately) contains no <code>panicked</code> / <code>Broken     pipe</code>, and the exit is a SIGPIPE termination (unix
+ <code>ExitStatusExt::signal() == Some(13)</code>; works on macOS and Linux,
+gate the test <code>#[cfg(unix)]</code>).</label></li>
+<li><label><input type="checkbox" checked="" />Cover one command per allowlist class: <code>list</code>, <code>show --json</code>,
+ <code>export</code>, <code>agents-info</code> (no skein needed), <code>config</code>.</label></li>
+<li><label><input type="checkbox" checked="" />Reuse the existing test harness for skein setup (see how
+ <code>tests/serve.rs</code> and the CLI tests create a skein and set
+ <code>BRAID_SYNC_URL</code> / <code>BRAID_NO_CACHE</code>) so the child doesn’t wait on a
+real network timeout.</label></li>
+<li><label><input type="checkbox" checked="" />Negative guard (cheap, deterministic): a non-allowlisted command,
+for example <code>braid create ...</code> with the closed-pipe stdout, must <em>not</em>
+die by signal 13 (it keeps Rust’s default; it may panic or exit 0).
+This pins the allowlist boundary without needing a live server.</label></li>
+<li><label><input type="checkbox" checked="" />Confirm the positive tests fail on current <code>main</code> for the right
+reason: exit code 101 plus <code>panicked ... Broken pipe</code> on stderr.</label></li>
+<li><label><input type="checkbox" checked="" />Dropped: the <code>serve</code>/<code>mcp</code> “still running after stdout closes”
+guard test. <code>serve</code> prints one line at startup, and <code>mcp</code> only writes
+in response to requests, so the test is inherently timing-dependent.
+The allowlist plus the negative guard above cover the intent.</label></li>
+</ul>
+</section>
+<section id="phase-2-implement" class="section level2">
+<h2>Phase 2: implement</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Add <code>libc = &quot;0.2&quot;</code> to <code>[workspace.dependencies]</code> in the root
+ <code>Cargo.toml</code> (the repo pins shared deps there), and
+ <code>[target.&#39;cfg(unix)&#39;.dependencies] libc = { workspace = true }</code> in
+ <code>crates/braid/Cargo.toml</code>. No musl impact: libc is already compiled
+for every target via tokio/mio/std, and no C toolchain is needed.</label></li>
+<li><label><input type="checkbox" checked="" />In <code>main.rs</code>, add <code>#[cfg(unix)] fn restore_sigpipe()</code> calling
+ <code>unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }</code> with a
+ <code>// SAFETY:</code> comment; a non-unix no-op. This is the repo’s first
+ <code>unsafe</code>; no lint forbids it.</label></li>
+<li><label><input type="checkbox" checked="" />Call it from the allowlisted match arms only (Details has the list),
+not before the <code>match</code>. Do not match on a denylist.</label></li>
+<li><label><input type="checkbox" checked="" />Verify the Phase 1 tests now pass.</label></li>
+</ul>
+</section>
+<section id="phase-3-docs-and-verification" class="section level2">
+<h2>Phase 3: docs and verification</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />No CLI surface change, so <code>agents-info.md</code> and docs-drift are
+unaffected; confirm <code>cargo nextest run -p braid</code> keeps <code>docs_drift</code>
+green.</label></li>
+<li><label><input type="checkbox" checked="" /><code>cargo clippy -p braid --all-targets -- -D warnings</code></label></li>
+<li><label><input type="checkbox" checked="" /><code>cargo nextest run -p braid</code></label></li>
+<li><label><input type="checkbox" checked="" />Manual check: <code>braid list | head -1; echo ${pipestatus[1]}</code> prints 141
+with no panic (zsh; <code>PIPESTATUS</code> in bash).</label></li>
+<li><label><input type="checkbox" checked="" /><code>cargo xtask ci</code> before pushing.</label></li>
+<li><label><input type="checkbox" checked="" /><code>q2 render --strict claude-notes/plans/2026/11/02/sigpipe.md</code> before
+pushing (the file is under <code>claude-notes/</code>).</label></li>
+<li><label><input type="checkbox" checked="" />(N/A: no skein configured in this checkout; Windows follow-up noted in PR) If this is tracked as a strand, mark it <code>in_progress</code> with
+ <code>BRAID_AUTHOR=claude</code> when starting and close it with a summary.</label></li>
+<li><label><input type="checkbox" checked="" />Reconcile this checklist against what landed, then commit the plan.</label></li>
+</ul>
+</section>
+<section id="details" class="section level2">
+<h2>Details</h2>
+<section id="phase-1-audit-done" class="section level3">
+<h3>Phase 1 audit (done)</h3>
+<p>Every command except the config-only ones goes through
+<code>Session::open</code> → <code>open_skein</code> (<code>ops.rs:256</code>, <code>skein.rs:73</code>), which dials
+the server (<code>connect</code>, <code>skein.rs:116</code>) and <code>pull()</code>s (<code>skein.rs:131</code>). So
+list/show/ready/etc. all sync. The read commands then call
+<code>session.shutdown()</code> → <code>repo.stop()</code> (<code>ops.rs:335</code>, <code>skein.rs:201</code>) before
+printing (<code>commands.rs</code> <code>list</code> ~1138, <code>show</code>, <code>ready</code>, <code>blocked</code>,
+<code>search</code>, <code>dep_list</code>, <code>dep_cycles</code>, <code>dep_tree</code>, <code>export</code> ~945).</p>
+<p>Classification:</p>
+<table class="caption-top table">
+<thead>
+<tr class="header">
+<th>Command
+</th>
+<th>Opens sync?
+</th>
+<th>Prints after shutdown?
+</th>
+<th>SIG_DFL?
+</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>list</code>, <code>show</code>, <code>ready</code>, <code>blocked</code>, <code>search</code>, <code>dep list/tree/cycles</code>, <code>export</code>
+</td>
+<td>yes
+</td>
+<td>yes
+</td>
+<td><strong>allow</strong>
+</td>
+</tr>
+<tr class="even">
+<td><code>agents-info</code> (no <code>--install</code>), <code>secret</code>, <code>config</code>
+</td>
+<td>no
+</td>
+<td>n/a
+</td>
+<td><strong>allow</strong>
+</td>
+</tr>
+<tr class="odd">
+<td><code>agents-info --install</code>
+</td>
+<td>no
+</td>
+<td>writes a file
+</td>
+<td>allow is harmless; keep out for simplicity
+</td>
+</tr>
+<tr class="even">
+<td><code>create</code>, <code>update</code>, <code>close</code>, <code>reopen</code>, <code>defer</code>, <code>undefer</code>, <code>comment</code>, <code>delete</code>, <code>dep add/remove</code>, <code>import</code>, <code>init</code>, <code>rotate</code>, <code>sync</code>
+</td>
+<td>yes
+</td>
+<td>prints around push/confirm
+</td>
+<td><strong>exclude</strong> (mutating; SIGPIPE mid-write/push is the real risk)
+</td>
+</tr>
+<tr class="odd">
+<td><code>mcp</code>, <code>serve</code>, <code>ui</code>
+</td>
+<td>yes, long-lived
+</td>
+<td>stdout is a protocol channel (<code>mcp</code>) or one startup line (<code>serve</code>)
+</td>
+<td><strong>exclude</strong>
+</td>
+</tr>
+</tbody>
+</table>
+<p><code>secret</code> and <code>config</code> print many small lines; a kill partway through is
+harmless.</p>
+<p>Why a kill after <code>shutdown()</code> is safe: cache writes go through samod’s
+storage, which writes atomically (temp file + rename, <code>cache.rs:262-274</code>),
+and the flush has completed by then. Network sockets are not a SIGPIPE
+source on the paths we ship: std sends with <code>MSG_NOSIGNAL</code> on Linux
+(<code>library/std/src/sys/net/connection/socket/mod.rs:433</code>) and mio sets
+<code>SO_NOSIGPIPE</code> on Apple targets (<code>mio/src/sys/unix/net.rs:39</code>). So the
+websocket/TCP sync path is already immune, and the real SIGPIPE exposure
+is stdout/stderr only. That is why a global reset would be survivable for
+<code>serve</code>, but the allowlist is still the right conservative default, and
+for <code>mcp</code> a silent kill on host disconnect is a behavior change.</p>
+</section>
+<section id="other-writers-and-children" class="section level3">
+<h3>Other writers and children</h3>
+<p><code>ui.rs</code>, <code>serve.rs</code>, and <code>skein.rs</code> only use <code>eprintln!</code> (plus one startup
+<code>println!</code> in <code>serve</code>). Panics on <code>eprintln!</code> to a closed stderr are a
+separate, unaddressed case. <code>build.rs</code> and tests run <code>Command::new</code> (npm,
+bash, tar); no production code spawns children, so no pipe interaction.
+<code>xtask</code> is a dev tool, out of scope.</p>
+</section>
+<section id="windows" class="section level3">
+<h3>Windows</h3>
+<p>Windows is built, tested (<code>ci.yml</code> windows job), and released
+(<code>release.yml</code> x86_64-pc-windows-msvc, <code>install.ps1</code>). With the signal
+approach, Windows keeps the current panic on <code>| head</code> (accepted: the
+no-op is explicit). If Windows matters, the helper approach is the only
+one that covers it (<code>BrokenPipe</code> / <code>ERROR_NO_DATA</code>).</p>
+</section>
+<section id="third-option-panic-hook-catch_unwind" class="section level3">
+<h3>Third option: panic hook / catch_unwind</h3>
+<p>Possible (a hook that matches “failed printing to stdout” and exits 141),
+but it depends on matching panic message text, and the panic fires inside
+tokio’s runtime context. Not recommended over either alternative.</p>
+</section>
+</section>
+</section>
+
+</main>
+</div>
+</body>
+</html>
