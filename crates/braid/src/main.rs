@@ -291,6 +291,26 @@ enum DepCmd {
     Cycles,
 }
 
+/// Restore the default `SIGPIPE` disposition (die quietly, like `ls | head`)
+/// instead of Rust's ignore-and-panic-on-`println!`.
+///
+/// Process-wide, so call it only from read-only commands that finish
+/// syncing and flush the cache (`session.shutdown()`) before printing.
+/// Mutating and long-lived commands (`serve`, `mcp`, `ui`) keep Rust's
+/// default so a closed peer surfaces as an `Err`, not a silent kill. Windows
+/// has no SIGPIPE; `| head` still panics there.
+#[cfg(unix)]
+fn restore_sigpipe() {
+    // SAFETY: `signal` with SIG_DFL is async-signal-safe and installs no
+    // handler; called from the main thread before any output is written.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe() {}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -334,10 +354,14 @@ async fn main() {
             )
             .await
         }
-        Cmd::Show { id, json } => commands::show(&cwd, &id, json).await,
+        Cmd::Show { id, json } => {
+            restore_sigpipe();
+            commands::show(&cwd, &id, json).await
+        }
         Cmd::List { status, all, label, assignee, issue_type, priority, json } => {
             let filter =
                 commands::FilterOpts { labels: label, assignee, issue_type, priorities: priority };
+            restore_sigpipe();
             commands::list(&cwd, status, all, filter, json).await
         }
         Cmd::Update {
@@ -390,26 +414,49 @@ async fn main() {
             DepCmd::Remove { issue, target, dep_type } => {
                 commands::dep_remove(&cwd, &issue, &target, dep_type).await
             }
-            DepCmd::List { issue } => commands::dep_list(&cwd, &issue).await,
-            DepCmd::Tree { issue, json } => commands::dep_tree(&cwd, &issue, json).await,
-            DepCmd::Cycles => commands::dep_cycles(&cwd).await,
+            DepCmd::List { issue } => {
+                restore_sigpipe();
+                commands::dep_list(&cwd, &issue).await
+            }
+            DepCmd::Tree { issue, json } => {
+                restore_sigpipe();
+                commands::dep_tree(&cwd, &issue, json).await
+            }
+            DepCmd::Cycles => {
+                restore_sigpipe();
+                commands::dep_cycles(&cwd).await
+            }
         },
         Cmd::Ready { label, assignee, issue_type, priority, json } => {
             let filter =
                 commands::FilterOpts { labels: label, assignee, issue_type, priorities: priority };
+            restore_sigpipe();
             commands::ready(&cwd, filter, json).await
         }
-        Cmd::Blocked { json } => commands::blocked(&cwd, json).await,
-        Cmd::Search { text, json } => commands::search(&cwd, &text, json).await,
+        Cmd::Blocked { json } => {
+            restore_sigpipe();
+            commands::blocked(&cwd, json).await
+        }
+        Cmd::Search { text, json } => {
+            restore_sigpipe();
+            commands::search(&cwd, &text, json).await
+        }
         Cmd::AgentsInfo { install } => match install {
             Some(dir) => commands::agents_info_install(&dir),
             None => {
+                restore_sigpipe();
                 commands::agents_info();
                 Ok(())
             }
         },
-        Cmd::Secret => commands::secret(&cwd),
-        Cmd::Config => commands::config(&cwd),
+        Cmd::Secret => {
+            restore_sigpipe();
+            commands::secret(&cwd)
+        }
+        Cmd::Config => {
+            restore_sigpipe();
+            commands::config(&cwd)
+        }
         Cmd::Rotate { revoke, adopt } => {
             if adopt {
                 commands::rotate_adopt(&cwd).await
@@ -418,7 +465,10 @@ async fn main() {
             }
         }
         Cmd::Import { path } => commands::import(&cwd, &path).await,
-        Cmd::Export => commands::export(&cwd).await,
+        Cmd::Export => {
+            restore_sigpipe();
+            commands::export(&cwd).await
+        }
         Cmd::Sync => commands::sync(&cwd).await,
         Cmd::Mcp { project, read_only, enable_destructive } => {
             braid::mcp::serve(braid::mcp::McpOpts { project, read_only, enable_destructive }).await

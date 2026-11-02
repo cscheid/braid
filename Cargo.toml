@@ -49,6 +49,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "serd
 tokio = { version = "1.46", features = ["macros", "rt-multi-thread", "net", "time"] }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+libc = "0.2"
 futures = "0.3"
 # default-features off: crates/braid enables exactly the features it uses.
 tokio-tungstenite = { version = "0.27", default-features = false }

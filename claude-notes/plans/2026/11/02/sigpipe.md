@@ -38,59 +38,59 @@ is in `Cargo.lock` (0.2.191) but is not yet a direct dependency of
 
 ## Phase 1: tests first
 
-- [ ] Add `crates/braid/tests/sigpipe.rs`. For determinism, do not race a
+- [x] Add `crates/braid/tests/sigpipe.rs`. For determinism, do not race a
       drop against the child's first write: create the pipe with
       `std::io::pipe()` (stable since 1.87; confirm the toolchain), `drop`
       the read end **before** spawning, and pass the write end as the
       child's stdout. Every stdout write then gets `EPIPE`, regardless of
       output size or timing, so no large fixture is needed.
-- [ ] Assert stderr (captured separately) contains no `panicked` / `Broken
+- [x] Assert stderr (captured separately) contains no `panicked` / `Broken
       pipe`, and the exit is a SIGPIPE termination (unix
       `ExitStatusExt::signal() == Some(13)`; works on macOS and Linux,
       gate the test `#[cfg(unix)]`).
-- [ ] Cover one command per allowlist class: `list`, `show --json`,
+- [x] Cover one command per allowlist class: `list`, `show --json`,
       `export`, `agents-info` (no skein needed), `config`.
-- [ ] Reuse the existing test harness for skein setup (see how
+- [x] Reuse the existing test harness for skein setup (see how
       `tests/serve.rs` and the CLI tests create a skein and set
       `BRAID_SYNC_URL` / `BRAID_NO_CACHE`) so the child doesn't wait on a
       real network timeout.
-- [ ] Negative guard (cheap, deterministic): a non-allowlisted command,
+- [x] Negative guard (cheap, deterministic): a non-allowlisted command,
       for example `braid create ...` with the closed-pipe stdout, must *not*
       die by signal 13 (it keeps Rust's default; it may panic or exit 0).
       This pins the allowlist boundary without needing a live server.
-- [ ] Confirm the positive tests fail on current `main` for the right
+- [x] Confirm the positive tests fail on current `main` for the right
       reason: exit code 101 plus `panicked ... Broken pipe` on stderr.
-- [ ] Dropped: the `serve`/`mcp` "still running after stdout closes"
+- [x] Dropped: the `serve`/`mcp` "still running after stdout closes"
       guard test. `serve` prints one line at startup, and `mcp` only writes
       in response to requests, so the test is inherently timing-dependent.
       The allowlist plus the negative guard above cover the intent.
 
 ## Phase 2: implement
 
-- [ ] Add `libc = "0.2"` to `[workspace.dependencies]` in the root
+- [x] Add `libc = "0.2"` to `[workspace.dependencies]` in the root
       `Cargo.toml` (the repo pins shared deps there), and
       `[target.'cfg(unix)'.dependencies] libc = { workspace = true }` in
       `crates/braid/Cargo.toml`. No musl impact: libc is already compiled
       for every target via tokio/mio/std, and no C toolchain is needed.
-- [ ] In `main.rs`, add `#[cfg(unix)] fn restore_sigpipe()` calling
+- [x] In `main.rs`, add `#[cfg(unix)] fn restore_sigpipe()` calling
       `unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) }` with a
       `// SAFETY:` comment; a non-unix no-op. This is the repo's first
       `unsafe`; no lint forbids it.
-- [ ] Call it from the allowlisted match arms only (Details has the list),
+- [x] Call it from the allowlisted match arms only (Details has the list),
       not before the `match`. Do not match on a denylist.
-- [ ] Verify the Phase 1 tests now pass.
+- [x] Verify the Phase 1 tests now pass.
 
 ## Phase 3: docs and verification
 
-- [ ] No CLI surface change, so `agents-info.md` and docs-drift are
+- [x] No CLI surface change, so `agents-info.md` and docs-drift are
       unaffected; confirm `cargo nextest run -p braid` keeps `docs_drift`
       green.
-- [ ] `cargo clippy -p braid --all-targets -- -D warnings`
-- [ ] `cargo nextest run -p braid`
+- [x] `cargo clippy -p braid --all-targets -- -D warnings`
+- [x] `cargo nextest run -p braid`
 - [ ] Manual check: `braid list | head -1; echo ${pipestatus[1]}` prints 141
       with no panic (zsh; `PIPESTATUS` in bash).
 - [ ] `cargo xtask ci` before pushing.
-- [ ] `q2 render --strict claude-notes/plans/2026/11/02/sigpipe.md` before
+- [x] `q2 render --strict claude-notes/plans/2026/11/02/sigpipe.md` before
       pushing (the file is under `claude-notes/`).
 - [ ] If this is tracked as a strand, mark it `in_progress` with
       `BRAID_AUTHOR=claude` when starting and close it with a summary.
@@ -134,8 +134,8 @@ for `mcp` a silent kill on host disconnect is a behavior change.
 
 ### Other writers and children
 
-`ui.rs`, `serve.rs`, and `skein.rs` only use `eprintln!` (plus `serve`'s
-one startup `println!`). Panics on `eprintln!` to a closed stderr are a
+`ui.rs`, `serve.rs`, and `skein.rs` only use `eprintln!` (plus one startup
+`println!` in `serve`). Panics on `eprintln!` to a closed stderr are a
 separate, unaddressed case. `build.rs` and tests run `Command::new` (npm,
 bash, tar); no production code spawns children, so no pipe interaction.
 `xtask` is a dev tool, out of scope.
